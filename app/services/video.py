@@ -695,9 +695,9 @@ def combine_videos(
                     else:
                         x, y = 0, 0
 
-                    clip = clip_resized.cropped(x=x, y=y,
-                                                width=video_width,
-                                                height=video_height)
+                    clip = clip_resized.cropped(x1=x, y1=y,
+                                                 width=video_width,
+                                                 height=video_height)
                     
             shuffle_side = random.choice(["left", "right", "top", "bottom"])
             if transition_value in (None, VideoTransitionMode.none.value):
