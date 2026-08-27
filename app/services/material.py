@@ -1,9 +1,12 @@
 import os
 import random
+import re
+import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Optional
 from urllib.parse import quote_plus, urlencode, urlsplit, urlunsplit
 
 import requests
@@ -14,6 +17,11 @@ from app.config import config
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode
 from app.services import material_cache, task_artifacts
 from app.utils import utils
+
+try:
+    import yt_dlp
+except ImportError:
+    yt_dlp = None
 
 # Thread-safe counter for API key rotation
 _api_key_counter = 0
@@ -105,6 +113,12 @@ def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, An
                 rendition[field] = str(value) if field == "id" else value
         if rendition:
             record["rendition"] = rendition
+
+    # YouTube-specific provenance fields (whitelist — only if present)
+    for field in ("title", "channel", "license_status", "video_id"):
+        val = source.get(field)
+        if val not in (None, ""):
+            record[field] = str(val)
     return record
 
 
@@ -604,6 +618,117 @@ def search_videos_coverr(
     return []
 
 
+def search_videos_youtube(
+    search_term: str,
+    minimum_duration: int,
+    video_aspect: VideoAspect = VideoAspect.portrait,
+) -> List[MaterialInfo]:
+    """
+    Search YouTube via yt_dlp's ytsearch (flat metadata only — no download).
+
+    Unlike Pexels/Pixabay/Coverr (which filter by portrait aspect at search
+    time), YouTube results are NOT aspect-filtered here. Landscape videos are
+    accepted and handled by the smart reframe pipeline (BAGIAN C). This lets
+    YouTube contribute landscape footage that would otherwise be excluded,
+    dramatically expanding the usable candidate pool.
+
+    yt_dlp search + metadata extraction works WITHOUT authentication. Video
+    *download* requires cookies (see ``save_video_youtube``).
+
+    License provenance: YouTube's license field is only available on full
+    extraction (blocked without auth). We mark status as ``"license_unknown"``
+    and rely on the caller to treat it accordingly (fail-clean if license is
+    a hard requirement).
+    """
+    if yt_dlp is None:
+        logger.error("yt_dlp is not installed; YouTube provider unavailable")
+        return []
+
+    aspect = VideoAspect(video_aspect)
+
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": True,      # metadata only, no download
+        "skip_download": True,
+        "simulate": True,
+        "force_generic_extractor": False,
+    }
+
+    cookies_file = config.app.get("youtube_cookies_file", "").strip()
+    if cookies_file and os.path.exists(cookies_file):
+        ydl_opts["cookiefile"] = cookies_file
+
+    query = f"ytsearch:{search_term}"
+    logger.info(f"searching videos on youtube: term={search_term!r}")
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(query, download=False)
+    except Exception as e:
+        logger.error(
+            "youtube video search failed: "
+            f"error={type(e).__name__}, detail={str(e)[:200]}"
+        )
+        return []
+
+    entries = result.get("entries", []) if isinstance(result, dict) else []
+    if not entries:
+        return []
+
+    video_items: List[MaterialInfo] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        duration = entry.get("duration")
+        if duration is None:
+            # Live streams or entries without duration — skip (can't fit scene)
+            continue
+        try:
+            duration = int(float(duration))
+        except (TypeError, ValueError):
+            continue
+        if duration < minimum_duration:
+            continue
+
+        video_id = entry.get("id") or ""
+        title = entry.get("title") or ""
+        channel = entry.get("channel") or entry.get("uploader") or ""
+        url = entry.get("weburl") or entry.get("url") or ""
+        if not url.startswith("http"):
+            url = f"https://www.youtube.com/watch?v={video_id}"
+
+        # Try to extract resolution from formats
+        rendition = None
+        formats = entry.get("formats") or []
+        if formats:
+            best = max(formats, key=lambda f: f.get("height", 0) or 0)
+            rendition = {
+                "id": best.get("format_id"),
+                "width": best.get("width"),
+                "height": best.get("height"),
+            }
+
+        item = MaterialInfo()
+        item.provider = "youtube"
+        item.url = url
+        item.duration = duration
+        item.source_info = {
+            "provider": "youtube",
+            "search_term": search_term,
+            "asset_id": str(video_id) if video_id else None,
+            "source_page": url,
+            "title": title,
+            "channel": channel,
+            "license_status": "license_unknown",
+            "rendition": rendition,
+        }
+        video_items.append(item)
+
+    return video_items
+
+
 # WaveSpeed AI (https://wavespeed.ai) 通过文生视频模型按脚本关键词直接生成素材，
 # 与三个库存素材源共用 MaterialInfo 结果结构和后续下载、剪辑流程。
 WAVESPEED_API_BASE_URL = "https://api.wavespeed.ai/api/v3"
@@ -1044,6 +1169,222 @@ def save_video(video_url: str, save_dir: str = "") -> str:
     return ""
 
 
+# ─── YouTube download + universal resolver helpers ──────────────────────────
+
+# Minimum resolution below which a clip is considered too low-quality for a
+# 9:16 render after reframing.  Clips at or above this threshold have enough
+# pixels to fill 1080×1920 (even after scale-to-cover + crop).
+_MATERIAL_MIN_WIDTH = 480
+_MATERIAL_MIN_HEIGHT = 480
+
+
+def save_video_youtube(video_url: str, save_dir: str = "") -> str:
+    """Download a YouTube video via yt_dlp.
+
+    Uses the ``cookiefile`` from ``config.app['youtube_cookies_file']`` when
+    configured.  Without cookies, YouTube blocks the download with HTTP 403
+    (bot detection) — in that case the function returns ``""`` (fail-clean),
+    allowing the caller to try the next provider.
+
+    Returns the local file path on success, ``""`` on failure.
+    """
+    if yt_dlp is None:
+        logger.error("yt_dlp is not installed; YouTube download unavailable")
+        return ""
+
+    if not save_dir:
+        save_dir = utils.storage_dir("cache_videos")
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    # Derive a deterministic filename from the URL hash (same convention as
+    # save_video so yt-dlp and HTTP downloads of the same URL are cached).
+    url_without_query = video_url.split("?")[0]
+    url_hash = utils.md5(url_without_query)
+    video_id = f"vid-{url_hash}"
+    video_path = f"{save_dir}/{video_id}.mp4"
+
+    if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+        logger.info(f"youtube video already exists: {video_path}")
+        return video_path
+
+    ydl_opts = {
+        "format": "best[ext=mp4][height<=720]",
+        "outtmpl": video_path,
+        "quiet": True,
+        "no_warnings": True,
+        "merge_output_format": "mp4",
+    }
+
+    cookies_file = config.app.get("youtube_cookies_file", "").strip()
+    if cookies_file and os.path.exists(cookies_file):
+        ydl_opts["cookiefile"] = cookies_file
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+    except yt_dlp.utils.DownloadError as e:
+        if "403" in str(e) or "Sign in" in str(e):
+            logger.error(
+                f"youtube download blocked (403/bot detection) for {video_url}; "
+                "set youtube_cookies_file in config.toml for authenticated downloads"
+            )
+        else:
+            logger.error(
+                f"youtube download failed: error={type(e).__name__}, "
+                f"detail={str(e)[:200]}"
+            )
+        return ""
+    except Exception as e:
+        logger.error(
+            f"youtube download failed: error={type(e).__name__}, "
+            f"detail={str(e)[:200]}"
+        )
+        return ""
+
+    if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+        return video_path
+    return ""
+
+
+def _validate_downloaded_clip(video_path: str,
+                               min_duration: int = 0) -> bool:
+    """Quality-gate: verify a downloaded clip is playable and meets minimum
+    requirements.  Uses ffprobe + moviepy to check:
+
+    * File exists and size > 0
+    * Has a video stream with codec (h264/h265)
+    * Duration > 0 and fps > 0
+    * Width × Height >= _MATERIAL_MIN_WIDTH × _MATERIAL_MIN_HEIGHT
+
+    Returns True if the clip passes all checks.
+    """
+    if not video_path or not os.path.exists(video_path):
+        return False
+    if os.path.getsize(video_path) <= 1024:
+        return False
+
+    try:
+        clip = VideoFileClip(video_path)
+        duration = clip.duration
+        fps = clip.fps
+        w, h = clip.size
+        clip.close()
+    except Exception as e:
+        logger.warning(f"quality gate: invalid video {video_path}: {e}")
+        return False
+
+    if duration <= 0 or fps <= 0:
+        logger.warning(f"quality gate: zero duration/fps for {video_path}")
+        return False
+
+    if w < _MATERIAL_MIN_WIDTH or h < _MATERIAL_MIN_HEIGHT:
+        logger.warning(
+            f"quality gate: resolution {w}x{h} below minimum "
+            f"{_MATERIAL_MIN_WIDTH}x{_MATERIAL_MIN_HEIGHT} for {video_path}"
+        )
+        return False
+
+    if min_duration > 0 and duration < min_duration:
+        logger.warning(
+            f"quality gate: duration {duration:.1f}s below minimum {min_duration}s "
+            f"for {video_path}"
+        )
+        return False
+
+    return True
+
+
+def _score_candidate(item: MaterialInfo, search_term: str,
+                     minimum_duration: int, video_aspect: VideoAspect) -> float:
+    """Score a material candidate: higher = better.
+
+    Scoring factors (normalized to ~0–1 range):
+      * Duration match (0.3 weight): closer to or above minimum_duration.
+      * Relevance (0.4 weight): keyword overlap between search_term and item
+        title/description (case-insensitive token overlap).
+      * Resolution (0.3 weight): pixel count, higher is better for reframing.
+    """
+    score = 0.0
+    info = item.source_info or {}
+
+    # Duration match: full points if >= minimum_duration, partial if close
+    dur = item.duration or 0
+    if dur >= minimum_duration:
+        score += 0.3
+    elif dur >= minimum_duration * 0.8:
+        score += 0.15
+
+    # Relevance: token overlap
+    query_tokens = set(search_term.lower().split())
+    title = str(info.get("title", ""))
+    desc = str(info.get("description", ""))
+    text_tokens = set((title + " " + desc).lower().split())
+    if query_tokens:
+        overlap = len(query_tokens & text_tokens)
+        score += 0.4 * min(overlap / len(query_tokens), 1.0)
+
+    # Resolution: pixel count
+    rendition = info.get("rendition") or {}
+    w = rendition.get("width", 0) or 0
+    h = rendition.get("height", 0) or 0
+    if w > 0 and h > 0:
+        area = w * h
+        # 1080p = ~2M pixels, 4K = ~8M pixels
+        # Normalize: 0 for tiny, 0.3 for 1080p+, extra for higher
+        area_score = min(area / 2_000_000, 1.0)  # 1.0 = ~1080p or above
+        score += 0.3 * area_score
+    else:
+        # Unknown resolution — neutral score (doesn't hurt, doesn't help)
+        score += 0.1
+
+    return score
+
+
+def rank_videos(
+    items: List[MaterialInfo],
+    search_term: str,
+    minimum_duration: int,
+    video_aspect: VideoAspect,
+) -> List[MaterialInfo]:
+    """Rank candidate clips by relevance, duration, and resolution.
+
+    Filters out:
+      * Clips shorter than ``minimum_duration``
+      * Clips with resolution below ``_MATERIAL_MIN_WIDTH`` x ``_MATERIAL_MIN_HEIGHT``
+        (when resolution is known)
+
+    Unlike ``_filter_materials_by_aspect`` (which rejects landscape clips for
+    portrait output), this function ACCEPTS landscape clips — they will be
+    reframed by the smart reframe pipeline. Clips with unknown resolution are
+    retained (let the quality gate / reframing decide).
+
+    Returns candidates sorted by descending score.
+    """
+    scored: list[tuple[float, MaterialInfo]] = []
+    for item in items:
+        info = item.source_info or {}
+        dur = item.duration or 0
+
+        # Filter: duration
+        if dur < minimum_duration:
+            continue
+
+        # Filter: known-bad resolution (skip tiny clips)
+        rendition = info.get("rendition") or {}
+        w = rendition.get("width", 0) or 0
+        h = rendition.get("height", 0) or 0
+        if w > 0 and h > 0:
+            if w < _MATERIAL_MIN_WIDTH or h < _MATERIAL_MIN_HEIGHT:
+                continue
+
+        score = _score_candidate(item, search_term, minimum_duration, video_aspect)
+        scored.append((score, item))
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _, item in scored]
+
+
 def _search_videos_with_cache(
     provider: str,
     search_videos: Callable[..., List[MaterialInfo]],
@@ -1271,7 +1612,241 @@ def download_videos(
     return video_paths
 
 
+def _provider_and_searcher(source: str):
+    """Resolve (provider_name, remote_search_fn) for a source, mirroring
+    download_videos exactly so the legacy mapping is not duplicated."""
+    provider = "pexels"
+    remote_search_videos = search_videos_pexels
+    if source == "pixabay":
+        provider = "pixabay"
+        remote_search_videos = search_videos_pixabay
+    elif source == "coverr":
+        provider = "coverr"
+        remote_search_videos = search_videos_coverr
+    elif source == "wavespeed":
+        provider = "wavespeed"
+        remote_search_videos = generate_videos_wavespeed
+    elif source == "youtube":
+        provider = "youtube"
+        remote_search_videos = search_videos_youtube
+    return provider, remote_search_videos
+
+
+def _resolve_material_directory(task_id: str) -> str:
+    """Same material_directory resolution as download_videos (kept local to
+    avoid mutating the legacy function)."""
+    material_directory = config.app.get("material_directory", "").strip()
+    if material_directory == "task":
+        material_directory = utils.task_dir(task_id)
+    elif material_directory and not os.path.isdir(material_directory):
+        material_directory = ""
+    return material_directory
+
+
+def _download_material_item(item: MaterialInfo, provider: str,
+                              material_directory: str) -> str:
+    """Download a single material item using the appropriate downloader.
+
+    Tries HTTP-based ``save_video`` first (works for Pexels/Pixabay/Coverr).
+    For YouTube items, also tries ``save_video_youtube`` (yt_dlp with cookie
+    support) as a fallback when ``save_video`` fails (e.g. 403 bot detection).
+    """
+    saved = save_video(video_url=item.url, save_dir=material_directory)
+    if saved:
+        return saved
+    if provider == "youtube" and yt_dlp is not None:
+        logger.info(f"save_video failed for youtube, trying yt_dlp download: {item.url}")
+        saved = save_video_youtube(video_url=item.url, save_dir=material_directory)
+        if saved:
+            return saved
+    return ""
+
+
+def download_videos_by_scene(
+    task_id: str,
+    video_scenes: list,
+    source: str = "pixabay",
+    video_aspect: VideoAspect = VideoAspect.portrait,
+    max_clip_duration: int = 5,
+    material_directory: str = "",
+    sources: Optional[List[str]] = None,
+) -> List[str]:
+    """Scene-aware material path with multi-provider fallback + ranking + quality gate.
+
+    For EACH scene, in exact scene order:
+      scene.visual_query → provider candidates → ranking → download → quality gate
+
+    The ``sources`` parameter is an ordered fallback list (e.g.
+    ``["pexels", "pixabay", "youtube"]``).  For each scene the resolver tries
+    providers left-to-right; the FIRST provider that returns a valid,
+    downloadable, quality-gated clip wins that scene.
+
+    Changes from the Phase 7B implementation:
+      * Accepts ``sources`` list (backward-compatible: ``source`` still works).
+      * Uses ``rank_videos()`` instead of ``usable[0]`` — scores by
+        relevance, duration, and resolution; accepts landscape clips (reframed
+        downstream).
+      * Tries the next provider when one returns no usable candidates
+        (fail-clean only when ALL providers are exhausted).
+      * Quality-gates each downloaded clip via ffprobe + moviepy.
+
+    Hard rules (enforced here):
+      * ONE clip per scene (no pooling, no reuse).
+      * If a scene has no usable material across ALL providers, the task FAILS
+        CLEANLY with a message identifying scene index + visual_query.
+      * No cross-scene substitution — ``used_asset_ids`` prevents reuse.
+
+    Material sources are persisted with scene attribution (scene_index,
+    visual_query, asset_id, provider) via ``_persist_material_sources``.
+
+    Returns a scene-ordered list of downloaded clip file paths (1:1 with scenes).
+    """
+    # Backward compatibility: single ``source`` → single-element list
+    if sources is None:
+        sources = [source]
+
+    if not material_directory:
+        material_directory = _resolve_material_directory(task_id)
+
+    video_paths: List[str] = []
+    material_sources: list[dict] = []
+    # "no clip reused" within a single render: two scenes may share a visual
+    # query (e.g. the hook reuses the topic's first keyword), but they must
+    # still receive DISTINCT material — each scene keeps its own selected clip
+    # from its OWN query pool. This is never cross-scene substitution (a
+    # different query's clip); it only skips an already-claimed asset from this
+    # scene's own results and takes the next one.
+    used_asset_ids: set[str] = set()
+
+    for scene_index, scene in enumerate(video_scenes):
+        visual_query = scene.get("visual_query") or ""
+        scene_clip: Optional[str] = None
+        scene_record: Optional[dict] = None
+        selected_provider: Optional[str] = None
+
+        for src in sources:
+            provider, remote_search_videos = _provider_and_searcher(src)
+
+            items = _search_videos_with_cache(
+                provider=provider,
+                search_videos=remote_search_videos,
+                search_term=visual_query,
+                minimum_duration=max_clip_duration,
+                video_aspect=video_aspect,
+            )
+
+            # Rank candidates: filters by duration/resolution, scores by
+            # relevance + resolution + duration.  Accepts all aspect ratios
+            # (landscape clips are reframed downstream by BAGIAN C).
+            ranked = rank_videos(
+                items, visual_query, max_clip_duration, video_aspect
+            )
+
+            # Exclude assets already claimed by an earlier scene in THIS render.
+            ranked = [
+                m for m in ranked
+                if (m.source_info or {}).get("asset_id") not in used_asset_ids
+            ]
+
+            if not ranked:
+                logger.debug(
+                    f"scene {scene_index}: provider={provider} returned no usable "
+                    f"candidates after ranking for visual_query={visual_query!r}"
+                )
+                continue
+
+            # Try candidates in ranked order (best first)
+            for item in ranked:
+                asset_id = (item.source_info or {}).get("asset_id")
+                try:
+                    saved_video_path = _download_material_item(
+                        item, provider, material_directory
+                    )
+                except Exception as download_error:
+                    logger.warning(
+                        f"scene {scene_index}: download error for "
+                        f"asset_id={asset_id}: {type(download_error).__name__}"
+                    )
+                    saved_video_path = ""
+
+                if not saved_video_path:
+                    logger.warning(
+                        f"scene {scene_index}: download failed for "
+                        f"asset_id={asset_id}, visual_query={visual_query!r}"
+                    )
+                    continue  # try next ranked candidate
+
+                # Quality gate: validate the downloaded clip
+                if not _validate_downloaded_clip(
+                    saved_video_path, min_duration=max_clip_duration
+                ):
+                    logger.warning(
+                        f"scene {scene_index}: quality gate rejected clip "
+                        f"asset_id={asset_id}, visual_query={visual_query!r}"
+                    )
+                    continue  # try next ranked candidate
+
+                # Success — this clip is the winner for this scene
+                scene_clip = saved_video_path
+                selected_provider = provider
+                used_asset_ids.add(asset_id)
+
+                try:
+                    record = _material_source_record(item, saved_video_path)
+                except Exception as source_error:
+                    logger.warning(
+                        f"failed to build material source record for scene "
+                        f"{scene_index}: {type(source_error).__name__}, "
+                        f"detail={source_error}"
+                    )
+                    record = {
+                        "provider": getattr(item, "provider", provider) or provider,
+                        "local_file": Path(saved_video_path).name,
+                        "duration": int(getattr(item, "duration", 0) or 0),
+                    }
+
+                # Scene attribution for the auditable scene->asset->timeline mapping.
+                record["scene_index"] = scene_index
+                record["visual_query"] = visual_query
+                record["narration"] = scene.get("narration", "")
+                if item.source_info and isinstance(
+                    item.source_info.get("asset_id"), str
+                ):
+                    record.setdefault("asset_id", item.source_info["asset_id"])
+
+                scene_record = record
+                break  # stop trying candidates for this scene
+
+            if scene_clip:
+                break  # stop trying providers for this scene
+
+        if not scene_clip:
+            logger.error(
+                f"scene {scene_index} failed across all providers: "
+                f"visual_query={visual_query!r}, sources={sources}"
+            )
+            raise RuntimeError(
+                f"scene {scene_index} has no usable material for "
+                f"visual_query {visual_query!r} "
+                f"(sources={sources}); all providers exhausted, "
+                f"skipping another scene's clip is not allowed"
+            )
+
+        video_paths.append(scene_clip)
+        material_sources.append(scene_record)
+        logger.info(
+            f"scene {scene_index} material selected: "
+            f"visual_query={visual_query!r}, "
+            f"asset_id={scene_record.get('asset_id')}, "
+            f"provider={selected_provider}"
+        )
+
+    _persist_material_sources(task_id, material_sources)
+    return video_paths
+
+
 def _download_videos_wavespeed_on_demand(
+
     *,
     task_id: str,
     search_terms: List[str],

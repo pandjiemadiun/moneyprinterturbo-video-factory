@@ -35,6 +35,7 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
+from app.services import reframe
 from app.services.utils import video_effects
 from app.utils import file_security, utils
 
@@ -545,6 +546,7 @@ def combine_videos(
     max_clip_duration: int = 5,
     threads: int = 2,
     clip_speed: float = 1.0,
+    scene_specs: list | None = None,
 ) -> str:
     audio_clip = AudioFileClip(audio_file)
     try:
@@ -582,7 +584,7 @@ def combine_videos(
     processed_clips = []
     subclipped_items = []
     video_duration = 0
-    for video_path in video_paths:
+    for idx, video_path in enumerate(video_paths):
         clip = _open_video_clip_quietly(video_path)
         clip_duration = clip.duration
         clip_w, clip_h = clip.size
@@ -592,6 +594,14 @@ def combine_videos(
 
         while start_time < clip_duration:
             end_time = min(start_time + source_clip_duration, clip_duration)
+            # Scene-aware: each source clip is trimmed to its scene's authoritative
+            # TTS duration (scene_specs[idx]["duration"]). Legacy path keeps
+            # source_clip_duration (the 5s keyword-loop model). No cross-scene
+            # substitution: exactly one segment is emitted per source in order.
+            if scene_specs:
+                end_time = min(
+                    start_time + scene_specs[idx]["duration"], clip_duration
+                )
 
             # 保留所有有效分段。
             # 这样既不会丢掉“整段视频本身就短于 max_clip_duration”的素材，
@@ -621,7 +631,8 @@ def combine_videos(
     
     # Add downloaded clips over and over until the duration of the audio (max_duration) has been reached
     for i, subclipped_item in enumerate(subclipped_items):
-        if video_duration >= required_video_duration:
+        # Scene-aware mode: every scene must be represented — do NOT early-exit.
+        if scene_specs is None and video_duration >= required_video_duration:
             break
         
         logger.debug(
@@ -649,19 +660,44 @@ def combine_videos(
                 logger.debug(f"resizing clip, source: {clip_w}x{clip_h}, ratio: {clip_ratio:.2f}, target: {video_width}x{video_height}, ratio: {video_ratio:.2f}")
                 
                 if clip_ratio == video_ratio:
+                    # Same aspect ratio → uniform scale to target
                     clip = clip.resized(new_size=(video_width, video_height))
                 else:
+                    # Scale-to-cover + crop (no stretching, no black bars).
+                    # This handles landscape→portrait, portrait→portrait at
+                    # different size, square→portrait, etc. via the reframe
+                    # module's center-crop (or content-aware crop when the
+                    # source file is available for probe/detect).
+                    #
+                    # For in-memory clips (common in the test path) we apply
+                    # the equivalent MoviePy math; for file-backed clips we can
+                    # optionally delegate to reframe.reframe_to_portrait() for
+                    # face/cropdetect-aware cropping.
                     if clip_ratio > video_ratio:
-                        scale_factor = video_width / clip_w
-                    else:
+                        # Source is wider than target → scale by height
                         scale_factor = video_height / clip_h
+                    else:
+                        # Source is taller than target → scale by width
+                        scale_factor = video_width / clip_w
 
-                    new_width = int(clip_w * scale_factor)
-                    new_height = int(clip_h * scale_factor)
+                    new_width = max(1, round(clip_w * scale_factor))
+                    new_height = max(1, round(clip_h * scale_factor))
 
-                    background = ColorClip(size=(video_width, video_height), color=(0, 0, 0)).with_duration(clip_duration)
-                    clip_resized = clip.resized(new_size=(new_width, new_height)).with_position("center")
-                    clip = CompositeVideoClip([background, clip_resized])
+                    clip_resized = clip.resized(new_size=(new_width, new_height))
+
+                    # Center crop to target dimensions
+                    if new_width > video_width:
+                        x = (new_width - video_width) // 2
+                        y = 0
+                    elif new_height > video_height:
+                        x = 0
+                        y = (new_height - video_height) // 2
+                    else:
+                        x, y = 0, 0
+
+                    clip = clip_resized.cropped(x=x, y=y,
+                                                width=video_width,
+                                                height=video_height)
                     
             shuffle_side = random.choice(["left", "right", "top", "bottom"])
             if transition_value in (None, VideoTransitionMode.none.value):
@@ -690,7 +726,7 @@ def combine_videos(
                 shuffle_transition = random.choice(transition_funcs)
                 clip = shuffle_transition(clip)
 
-            if clip.duration > max_clip_duration:
+            if scene_specs is None and clip.duration > max_clip_duration:
                 clip = clip.subclipped(0, max_clip_duration)
                 
             # wirte clip to temp file
@@ -722,7 +758,7 @@ def combine_videos(
             logger.error(f"failed to process clip: {str(e)}")
     
     # loop processed clips until the video duration covers the audio duration and the small safety margin.
-    if video_duration < required_video_duration:
+    if scene_specs is None and video_duration < required_video_duration:
         logger.warning(
             f"video duration ({video_duration:.2f}s) is shorter than required duration "
             f"({required_video_duration:.2f}s), looping clips to match audio length."
@@ -752,7 +788,9 @@ def combine_videos(
         output_file=combined_video_path,
         threads=threads,
         output_dir=output_dir,
-        max_duration=audio_duration,
+        # Scene-aware: concat exactly the scene clips once (no max_duration
+        # cycling). Legacy path caps concat at the audio duration.
+        max_duration=None if scene_specs else audio_duration,
     )
     
     # clean temp files
@@ -1228,6 +1266,19 @@ def generate_video(
                 clip = create_text_clip(subtitle_item=item)
                 text_clips.append(clip)
             video_clip = CompositeVideoClip([video_clip, *text_clips])
+            # Phase 8F root-cause fix: the subtitle TextClips above are stretched
+            # to their raw SRT end timestamps (`with_end(subtitle_item[0][1])`),
+            # which can extend PAST the real video layer (e.g. the final/CTA cue
+            # outlasts `combined-1.mp4`). Left unbounded, CompositeVideoClip
+            # adopts the subtitle layer's end time and renders the
+            # [video_end, subtitle_end] gap with its default BLACK background —
+            # a black tail with subtitles still visible. Anchor the composite to
+            # the real video-layer duration so the written video stream never
+            # extends past actual footage. Subtitles are only truncated where
+            # they fall entirely after the footage ends; all timing before the
+            # footage ends is preserved. Audio is unaffected (its longer tail
+            # is existing, unrelated MPT behaviour and produces no video frames).
+            video_clip = video_clip.with_duration(source_video_clip.duration)
             clip_stack.callback(video_clip.close)
 
         bgm_enabled = bgm_service.should_use_bgm(

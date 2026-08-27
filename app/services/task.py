@@ -1,4 +1,5 @@
 import math
+import json
 import os
 import re
 import socket
@@ -28,6 +29,7 @@ from app.services import (
     voice,
 )
 from app.services import upload_post
+from app.services.scene_durations import compute_scene_durations
 from app.services import state as sm
 from app.utils import file_security, utils
 
@@ -287,6 +289,17 @@ def _mark_task_failed(
 def generate_script(task_id, params):
     logger.info("\n\n## generating video script")
     video_script = params.video_script.strip()
+    if params.video_scenes and video_script:
+        # Phase 7B scene-aware: speak EXACTLY the scene narrations joined in
+        # order, with NO "N." list-number formatting. The list numbers are
+        # formatting ("accounted for"); they are not scene content, so they
+        # must not occupy TTS time. Speaking the narration sequence directly
+        # makes edge_tts emit one per-word cue sequence per scene, so every
+        # scene's authoritative duration (from the SubMaker) fills a contiguous
+        # interval and the per-scene clips reconstruct the full audio with NO
+        # tail loop. Legacy path (video_scenes is None) is unchanged.
+        scenes = _scenes_to_dicts(params.video_scenes)
+        video_script = "\n\n".join(s.get("narration", "") for s in scenes)
     if not video_script:
         video_script = llm.generate_script(
             video_subject=params.video_subject,
@@ -763,8 +776,46 @@ def _record_loomloom_run_reference(
     return None
 
 
+def _persist_scene_timing(task_id: str, scene_spans: list[dict]) -> None:
+    """Phase 7B: persist the scene->TTS-timing map to the task artifacts dir
+    (NOT to the Factory DB / quality-metric tables) so the
+    scene->asset->timeline invariant can be verified after the render.
+
+    This is pipeline timing data (the authoritative input to the no-loop
+    concat), not a quality metric. Written best-effort (never blocks render)."""
+    try:
+        task_dir = utils.task_dir(task_id)
+        timings_path = path.join(task_dir, "scene_timing.json")
+        with open(timings_path, "w", encoding="utf-8") as fh:
+            json.dump(scene_spans, fh, ensure_ascii=False, indent=2)
+        logger.info(f"persisted scene timing map -> {timings_path}")
+    except Exception as exc:
+        logger.warning(f"failed to persist scene timing map: {exc}")
+
+
+def _scenes_to_dicts(scenes: list) -> list[dict]:
+    """Normalise a scene list (pydantic ScenePlan or plain dicts) to dicts.
+
+    The API layer deserialises ``video_scenes`` from the JSON request body into
+    pydantic ``ScenePlan`` BaseModel objects; the duration + material helpers
+    (and their unit tests) consume plain dicts. Centralising the conversion here
+    keeps those helpers shape-agnostic and unchanged."""
+    out: list[dict] = []
+    for scene in scenes:
+        if isinstance(scene, dict):
+            out.append(dict(scene))
+        elif hasattr(scene, "model_dump"):
+            out.append(scene.model_dump())
+        elif hasattr(scene, "dict"):
+            out.append(scene.dict())
+        else:
+            out.append(dict(scene))
+    return out
+
+
 def generate_final_videos(
-    task_id, params, downloaded_videos, audio_file, subtitle_path, audio_duration
+    task_id, params, downloaded_videos, audio_file, subtitle_path, audio_duration,
+    scene_durations=None,
 ):
     final_video_paths = []
     combined_video_paths = []
@@ -784,6 +835,25 @@ def generate_final_videos(
         video_concat_mode = VideoConcatMode.random
     video_transition_mode = params.video_transition_mode
 
+    # Phase 7B scene-aware extension. When scene_durations is supplied we drive
+    # combine_videos with scene_specs (one clip per scene, trimmed to its real
+    # TTS duration) and a non-capping max_clip_duration so the legacy 5s safety
+    # cap never trims a scene. Scene-aware mode always concatenates in order and
+    # never cycles clips. When scene_durations is None every value below keeps
+    # the legacy behaviour byte-for-byte.
+    if scene_durations is not None:
+        video_concat_mode = VideoConcatMode.sequential
+    scene_specs = (
+        [{"duration": float(d["duration"])} for d in scene_durations]
+        if scene_durations is not None
+        else None
+    )
+    scene_max_clip_duration = (
+        math.ceil(max(d["duration"] for d in scene_durations)) + 1
+        if scene_durations is not None
+        else params.video_clip_duration
+    )
+
     _progress = 50
     for i in range(params.video_count):
         index = i + 1
@@ -798,9 +868,10 @@ def generate_final_videos(
             video_aspect=params.video_aspect,
             video_concat_mode=video_concat_mode,
             video_transition_mode=video_transition_mode,
-            max_clip_duration=params.video_clip_duration,
+            max_clip_duration=scene_max_clip_duration,
             threads=params.n_threads,
             clip_speed=params.video_clip_speed,
+            scene_specs=scene_specs,
         )
 
         _progress += 50 / params.video_count / 2
@@ -1354,19 +1425,62 @@ def _run_pipeline(
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
 
     # 5. Get video materials
-    downloaded_videos = get_video_materials(
-        task_id,
-        params,
-        video_terms,
-        audio_duration,
-        loomloom_video_request=loomloom_video_request,
-    )
-    if not downloaded_videos:
-        return _mark_task_failed(
+    scene_durations = None
+    if params.video_scenes:
+        # Phase 7B scene-aware: authoritative per-scene durations come from the
+        # real TTS SubMaker (edge_tts boundary="WordBoundary" -> per-word cues),
+        # NOT from word count, SRT clause count, or target_duration. A scene
+        # whose narration cannot be aligned to the spoken TTS stream fails the
+        # task cleanly rather than guessing a duration.
+        # Normalise pydantic ScenePlan objects to plain dicts here so the
+        # duration + material helpers share one simple shape (and stay
+        # identical to their unit-test inputs). The original params (with
+        # ScenePlan) remain in ``params`` for script.json persistence.
+        scenes = _scenes_to_dicts(params.video_scenes)
+        try:
+            scene_durations = compute_scene_durations(scenes, sub_maker)
+        except RuntimeError as exc:
+            return _mark_task_failed(
+                task_id,
+                "subtitle",
+                f"scene-aware timing failed: {exc}",
+            )
+        _persist_scene_timing(task_id, scene_durations)
+        try:
+            downloaded_videos = material.download_videos_by_scene(
+                task_id=task_id,
+                video_scenes=scenes,
+                source=params.video_source,
+                video_aspect=params.video_aspect,
+                max_clip_duration=params.video_clip_duration,
+                sources=params.video_sources or [params.video_source or "pexels"],
+            )
+        except RuntimeError as exc:
+            return _mark_task_failed(
+                task_id,
+                "materials",
+                f"scene-aware material failed: {exc}",
+            )
+        if not downloaded_videos or len(downloaded_videos) != len(scenes):
+            return _mark_task_failed(
+                task_id,
+                "materials",
+                "scene material count mismatch",
+            )
+    else:
+        downloaded_videos = get_video_materials(
             task_id,
-            "materials",
-            "failed to prepare video materials",
+            params,
+            video_terms,
+            audio_duration,
+            loomloom_video_request=loomloom_video_request,
         )
+        if not downloaded_videos:
+            return _mark_task_failed(
+                task_id,
+                "materials",
+                "failed to prepare video materials",
+            )
 
     if stop_at == "materials":
         sm.state.update_task(
@@ -1393,6 +1507,7 @@ def _run_pipeline(
             audio_file,
             subtitle_path,
             audio_duration,
+            scene_durations=scene_durations,
         )
     )
 
