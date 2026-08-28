@@ -283,6 +283,6 @@ and reported without modification.
 
 - **Validation-only commit:** the Phase 10H report is the only change added on top of
   `b57f8f8` (Phase 10G runtime). No source code was modified during Phase 10H.
-- **Commit hash:** recorded below after `git add docs/PHASE_10H_REPORT.md && git commit`.
-  - Pre-commit HEAD: `b57f8f8cfa0ce170277f870b21ef02ac871f6be0`
-  - (See commit log: the Phase 10H commit follows `b57f8f8`.)
+- **Commit hash (report introduction):** `b2d1f0904dcc6e966fc1e4bc98b79bc38941ca77`
+  - Parent (Phase 10G runtime): `b57f8f8cfa0ce170277f870b21ef02ac871f6be0`
+  - This is the commit that added `docs/PHASE_10H_REPORT.md`. No pipeline source was changed.
