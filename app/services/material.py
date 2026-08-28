@@ -1331,6 +1331,78 @@ def _youtube_video_identity(video_url: str) -> Optional[str]:
     return f"yt:{vid}"
 
 
+# Artifact suffixes that yt-dlp may leave at/near the outtmpl path on failure.
+# These mirror the patterns recognized by the orphan sweeper
+# (``_CACHE_VIDEOS_FILE_PATTERNS``) but are scoped to a single known video
+# filename so that cleanup never touches another video's cache file.
+_FAILED_YOUTUBE_ARTIFACT_SUFFIXES = ("", ".part", ".ytdl")
+_FAILED_YOUTUBE_FRAG_RE = re.compile(r"^(.+)\.mp4\.Frag\d+$")
+
+
+def _cleanup_failed_youtube_download(
+    video_path: str, *, created_before: bool
+) -> None:
+    """Remove partial artifacts left by yt-dlp after a failed download.
+
+    Only artifacts derived from ``video_path`` are considered, so a failing
+    download for video A can never delete a valid cached file for video B
+    (cross-job / concurrency safety).
+
+    ``created_before`` is True when ``video_path`` already existed (as a
+    valid or invalid file) *before* this download attempt.  In that case the
+    file is a pre-existing cache entry — we must NOT blindly delete it; instead
+    we only remove the yt-dlp-specific partial siblings (``.part``, ``.ytdl``,
+    ``.Frag*``) that this invocation may have created, and we leave the main
+    ``.mp4`` in place (it was not created by this failed download).
+
+    When ``created_before`` is False, this invocation created the target
+    (or it didn't exist at all), so removing a partial ``video_path`` is safe.
+
+    Cleanup failure is ALWAYS non-fatal: errors are logged as warnings and
+    never re-raised.  The original download failure is preserved upstream by
+    the caller's ``return ""``.
+    """
+    base = video_path  # e.g. /dir/vid-<hash>.mp4
+    if not isinstance(base, str) or not base:
+        return
+    if not base.endswith(".mp4"):
+        return
+
+    # 1. Clean yt-dlp partial siblings keyed to this video_path.
+    for suffix in _FAILED_YOUTUBE_ARTIFACT_SUFFIXES:
+        artifact = base + suffix  # "" => base, ".part" => base+".part", etc.
+        if suffix == "" and created_before:
+            # The main .mp4 pre-existed as a cache entry — do NOT delete it.
+            continue
+        try:
+            if os.path.isfile(artifact):
+                os.remove(artifact)
+        except OSError as exc:
+            logger.warning(
+                f"youtube download cleanup: failed to remove {artifact}: {exc}"
+            )
+
+    # 2. Clean fragment files (DASH download artifacts).
+    # yt-dlp may write vid-<hash>.mp4.Frag0, .Frag1, … in the same directory.
+    parent = os.path.dirname(base)
+    basename = os.path.basename(base)  # vid-<hash>.mp4
+    if parent and basename:
+        try:
+            for entry in os.listdir(parent):
+                if _FAILED_YOUTUBE_FRAG_RE.match(entry) and entry.startswith(basename):
+                    frag_path = os.path.join(parent, entry)
+                    try:
+                        if os.path.isfile(frag_path):
+                            os.remove(frag_path)
+                    except OSError as exc:
+                        logger.warning(
+                            f"youtube download cleanup: failed to remove "
+                            f"{frag_path}: {exc}"
+                        )
+        except OSError:
+            pass
+
+
 def save_video_youtube(video_url: str, save_dir: str = "") -> str:
     """Download a YouTube video via yt_dlp.
 
@@ -1366,6 +1438,15 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
         logger.info(f"youtube video already exists: {video_path}")
         return video_path
 
+    # Record whether the target existed BEFORE this download attempt.
+    # yt-dlp may leave partial artifacts (incomplete .mp4, .part, .ytdl, .Frag*)
+    # at or near video_path on failure.  We only clean up artifacts that this
+    # invocation could have created — if the file pre-existed as a valid cache,
+    # it is protected by the early-return above and we never reach this point.
+    # If the file pre-existed but was empty/invalid, we proceed to download
+    # (overwriting), and any partial left by this attempt must be cleaned.
+    _existed_before = os.path.exists(video_path)
+
     ydl_opts = {
         # Phase 10H.2: prefer the highest-quality MP4/H.264 video stream <=720p
         # plus compatible AAC audio, merged into an MP4 container.  The previous
@@ -1398,12 +1479,14 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
                 f"youtube download failed: error={type(e).__name__}, "
                 f"detail={str(e)[:200]}"
             )
+        _cleanup_failed_youtube_download(video_path, created_before=_existed_before)
         return ""
     except Exception as e:
         logger.error(
             f"youtube download failed: error={type(e).__name__}, "
             f"detail={str(e)[:200]}"
         )
+        _cleanup_failed_youtube_download(video_path, created_before=_existed_before)
         return ""
 
     if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
