@@ -230,13 +230,9 @@ class TestTempClipCleanupHardening(unittest.TestCase):
         def fake_concat(*args, **kwargs):
             raise RuntimeError("concat failed")
 
-        # Track temp clip files that would be created by _write_videofile
-        temp_clips_created = []
-
         def fake_write_videofile(clip, outputfile, **kwargs):
             # Simulate writing the temp clip to disk
             Path(outputfile).write_bytes(b"temp clip content")
-            temp_clips_created.append(outputfile)
 
         with (
             patch.object(vd, "AudioFileClip") as mock_audio,
@@ -245,10 +241,12 @@ class TestTempClipCleanupHardening(unittest.TestCase):
             patch.object(vd, "concat_video_clips_with_ffmpeg", side_effect=fake_concat),
         ):
             mock_audio.return_value = SimpleNamespace(duration=30, close=MagicMock())
-            # Mock the video opening to produce a minimal fake clip
+            # Mock clip with correct portrait dimensions (1080x1920) to skip resize
             mock_clip = MagicMock()
             mock_clip.duration = 10
-            mock_clip.size = (1920, 1080)
+            mock_clip.size = (1080, 1920)  # matches portrait VideoAspect resolution
+            mock_clip.w = 1080
+            mock_clip.h = 1920
             mock_clip.subclipped.return_value = mock_clip
             mock_clip.resized.return_value = mock_clip
             mock_clip.cropped.return_value = mock_clip
@@ -275,18 +273,57 @@ class TestTempClipCleanupHardening(unittest.TestCase):
             f"temp clips should be cleaned up after concat failure: {remaining_temp_clips}"
         )
 
-    def test_temp_clips_cleanup_on_encoding_failure(self):
+    def test_temp_clips_cleanup_on_unexpected_exception(self):
         """
-        TEST 6: Temp clips cleaned when encoding fails.
+        TEST 6: Temp clips cleaned when an unexpected exception occurs during concat.
+        This verifies the try/finally catches ANY exception type, not just RuntimeError.
         """
-        # This simulates _write_videofile failing during the clip processing loop
-        # After our fix, the finally block should clean any created temp clips
-        clip_file = os.path.join(self.tmpdir, "temp-clip-1.mp4")
-        Path(clip_file).write_bytes(b"partial")
+        combined_path = os.path.join(self.tmpdir, "combined-1.mp4")
 
-        # Simulate the cleanup path (delete_files is idempotent and safe)
-        vd.delete_files(clip_file)
-        self.assertFalse(os.path.exists(clip_file))
+        def fake_write_videofile(clip, outputfile, **kwargs):
+            Path(outputfile).write_bytes(b"temp clip content")
+
+        def fake_concat_unexpected(*args, **kwargs):
+            raise ValueError("unexpected concatenation error")
+
+        with (
+            patch.object(vd, "AudioFileClip") as mock_audio,
+            patch.object(vd, "_open_video_clip_quietly") as mock_open_clip,
+            patch.object(vd, "_write_videofile_with_codec_fallback", side_effect=fake_write_videofile),
+            patch.object(vd, "concat_video_clips_with_ffmpeg", side_effect=fake_concat_unexpected),
+        ):
+            mock_audio.return_value = SimpleNamespace(duration=30, close=MagicMock())
+            mock_clip = MagicMock()
+            mock_clip.duration = 10
+            mock_clip.size = (1080, 1920)
+            mock_clip.w = 1080
+            mock_clip.h = 1920
+            mock_clip.subclipped.return_value = mock_clip
+            mock_clip.resized.return_value = mock_clip
+            mock_clip.cropped.return_value = mock_clip
+            mock_clip.with_speed_scaled.return_value = mock_clip
+            mock_open_clip.return_value = mock_clip
+
+            try:
+                vd.combine_videos(
+                    combined_video_path=combined_path,
+                    video_paths=[os.path.join(self.tmpdir, "src.mp4")],
+                    audio_file=os.path.join(self.tmpdir, "audio.mp3"),
+                    max_clip_duration=5,
+                )
+            except ValueError:
+                pass  # expected unexpected exception
+
+        # After P1 fix (try/finally), temp clips should be cleaned even for
+        # unexpected exception types during concatenation
+        remaining_temp_clips = [
+            f for f in os.listdir(self.tmpdir)
+            if f.startswith("temp-clip-") and f.endswith(".mp4")
+        ]
+        self.assertEqual(
+            len(remaining_temp_clips), 0,
+            f"temp clips should be cleaned up after unexpected exception: {remaining_temp_clips}"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────
