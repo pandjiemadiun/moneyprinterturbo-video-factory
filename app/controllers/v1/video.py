@@ -274,6 +274,11 @@ def get_task(
                 _task_file_to_uri(v, endpoint, task_dir, request_id)
                 for v in task["combined_videos"]
             ]
+        if "thumbnails" in task and task["thumbnails"]:
+            response_task["thumbnails"] = [
+                _task_file_to_uri(v, endpoint, task_dir, request_id)
+                for v in task["thumbnails"]
+            ]
         return utils.get_response(200, response_task)
 
     raise HttpException(

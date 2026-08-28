@@ -1468,4 +1468,119 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
 
         valid_materials.append(material)
 
+
+def _extract_thumbnail_frame(
+    video_path: str,
+    output_path: str,
+    duration: float | None = None,
+) -> str | None:
+    """Extract a single representative frame from a video file using FFmpeg.
+
+    Uses a deterministic timestamp at 10% of the video duration (capped at
+    3 seconds) to avoid black opening frames. Returns the output path on
+    success, or None on failure.
+
+    This function is fail-safe: any error returns None rather than raising.
+    """
+    try:
+        if not os.path.isfile(video_path):
+            return None
+
+        if duration is None or duration <= 0:
+            duration = 10.0
+
+        timestamp = min(duration * 0.10, 3.0)
+
+        ffmpeg_binary = get_ffmpeg_binary()
+        cmd = [
+            ffmpeg_binary,
+            "-y",
+            "-ss", f"{timestamp:.3f}",
+            "-i", video_path,
+            "-frames:v", "1",
+            "-q:v", "5",
+            "-vf", "scale=480:-1",
+            output_path,
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=30,
+        )
+
+        if result.returncode != 0:
+            logger.warning(
+                f"thumbnail extraction failed: "
+                f"video={os.path.basename(video_path)}, "
+                f"stderr={result.stderr.decode('utf-8', errors='replace')[:200]}"
+            )
+            return None
+
+        if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+            return None
+
+        return output_path
+
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            f"thumbnail extraction timed out: video={os.path.basename(video_path)}"
+        )
+        return None
+    except Exception as exc:
+        logger.warning(
+            f"thumbnail extraction error: "
+            f"video={os.path.basename(video_path)}, "
+            f"error={type(exc).__name__}"
+        )
+        return None
+
+
+def generate_thumbnails(
+    final_video_paths: list[str],
+    output_dir: str,
+) -> list[str] | None:
+    """Generate thumbnail images for a list of final video files.
+
+    Extracts one frame from each video and saves it as thumbnail-{index}.jpg
+    in the output directory. Thumbnail generation is auxiliary: failure returns
+    None without raising and without affecting the parent task outcome.
+
+    Args:
+        final_video_paths: List of paths to final-{index}.mp4 files.
+        output_dir: Directory where thumbnails will be saved (typically the
+            task directory).
+
+    Returns:
+        List of thumbnail paths on success, or None if any thumbnail fails.
+        Returns None if the input list is empty.
+    """
+    if not final_video_paths:
+        return None
+
+    thumbnails = []
+    for index, video_path in enumerate(final_video_paths, start=1):
+        thumbnail_path = os.path.join(output_dir, f"thumbnail-{index}.jpg")
+        try:
+            result = _extract_thumbnail_frame(video_path, thumbnail_path)
+        except Exception as exc:
+            logger.warning(
+                f"thumbnail extraction raised unexpectedly: "
+                f"video={os.path.basename(video_path)}, "
+                f"error={type(exc).__name__}"
+            )
+            return None
+        if result is None:
+            logger.warning(
+                f"thumbnail generation failed for video {index}: "
+                f"task artifacts remain available"
+            )
+            return None
+        thumbnails.append(thumbnail_path)
+
+    logger.success(
+        f"generated {len(thumbnails)} thumbnail(s) in {output_dir}"
+    )
+    return thumbnails
+
     return valid_materials

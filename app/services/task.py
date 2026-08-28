@@ -941,8 +941,38 @@ def generate_final_videos(
     return final_video_paths, combined_video_paths, warnings
 
 
+def _generate_task_thumbnails(
+    task_id: str,
+    final_video_paths: list[str],
+) -> list[str] | None:
+    """Generate thumbnails for completed task videos.
+
+    Thumbnail generation is auxiliary: a failure here does NOT fail the task.
+    The task remains COMPLETE with videos available even if thumbnails fail.
+
+    Args:
+        task_id: The task ID (used to resolve the task directory).
+        final_video_paths: List of paths to successfully generated videos.
+
+    Returns:
+        List of thumbnail paths on success, None on any failure.
+    """
+    if not final_video_paths:
+        return None
+
+    task_dir = utils.task_dir(task_id)
+    try:
+        return video.generate_thumbnails(final_video_paths, task_dir)
+    except Exception as exc:
+        logger.warning(
+            f"thumbnail generation skipped due to error: "
+            f"task_id={task_id}, error={type(exc).__name__}, detail={exc}"
+        )
+        return None
+
+
 def _patch_cross_post_state(task_id: str, **kwargs) -> bool | None:
-    """安全更新发布字段；短暂状态后端故障时有限重试。"""
+    """安全更新发布字段；短暂状态后端故障时有限次重试。"""
     for attempt in range(1, _CROSS_POST_STATE_WRITE_ATTEMPTS + 1):
         try:
             return sm.state.patch_task(task_id, **kwargs)
@@ -1522,6 +1552,9 @@ def _run_pipeline(
         f"task {task_id} finished, generated {len(final_video_paths)} videos."
     )
 
+    # 6b. Generate thumbnails (auxiliary artifact, failure is non-fatal)
+    thumbnail_paths = _generate_task_thumbnails(task_id, final_video_paths)
+
     # 7. 先完成视频生成任务，再按需提交跨平台发布。第三方上传可能耗时
     # 数分钟，不应阻塞视频结果返回，也不能反向影响已经生成的成片。
     cross_post_enabled = (
@@ -1541,6 +1574,7 @@ def _run_pipeline(
     kwargs = {
         "videos": final_video_paths,
         "combined_videos": combined_video_paths,
+        "thumbnails": thumbnail_paths,
         "script": video_script,
         "terms": video_terms,
         "audio_file": audio_file,
