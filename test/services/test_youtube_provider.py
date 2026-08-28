@@ -200,11 +200,13 @@ def test_15_b_youtube_download_success():
     mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
     mock_ydl.__exit__ = MagicMock(return_value=False)
 
-    video_url = "https://www.youtube.com/watch?v=test123"
-    # Compute the same path save_video_youtube will derive from the URL hash
+    video_url = "https://www.youtube.com/watch?v=aB3kZ9qWe1s"
+    # Compute the same path save_video_youtube will derive: YouTube URLs are now
+    # keyed by canonical video identity (Phase 10H.1), not the raw URL.
     from app.utils import utils
-    url_without_query = video_url.split("?")[0]
-    url_hash = utils.md5(url_without_query)
+    identity = material._youtube_video_identity(video_url)
+    assert identity == "yt:aB3kZ9qWe1s"
+    url_hash = utils.md5(identity)
     real_path = os.path.join(tmp, f"vid-{url_hash}.mp4")
 
     def fake_download(urls, **kwargs):

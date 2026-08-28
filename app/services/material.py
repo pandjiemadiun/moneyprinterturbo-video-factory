@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, List, Optional
-from urllib.parse import quote_plus, urlencode, urlsplit, urlunsplit
+from urllib.parse import quote_plus, urlencode, urlparse, urlunsplit, parse_qs
 
 import requests
 from loguru import logger
@@ -1263,6 +1263,74 @@ def _validate_reframe_resolution(
     return effective_min >= min_effective_dimension
 
 
+# Hosts that identify a YouTube video resource (subdomain prefixes are stripped
+# inside the helper).  Only these hosts are canonicalized; everything else is
+# treated as a non-YouTube URL and falls back to the legacy URL-based key.
+_YOUTUBE_HOSTS = {
+    "youtube.com",
+    "youtu.be",
+    "youtube-nocookie.com",
+    "music.youtube.com",
+}
+
+# YouTube video IDs are exactly 11 characters from this alphabet.  Validating
+# the ID (rather than trusting any query value) keeps canonicalization safe for
+# malformed/unsupported URLs.
+_YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def _youtube_video_identity(video_url: str) -> Optional[str]:
+    """Return a canonical, collision-free identity for a YouTube video URL.
+
+    The previous cache key used ``video_url.split("?")[0]``, which collapsed
+    every ``https://www.youtube.com/watch?v=<ID>`` URL to the identical string
+    ``https://www.youtube.com/watch`` — so distinct videos shared one cache file
+    (Phase 10H.1 defect).  We now canonicalize by the YouTube *video ID* (the
+    only parameter that determines identity) and ignore tracking/query noise
+    (``feature=``, ``t=``, ``utm_*``, …).
+
+    Supported, MPT-relevant URL forms:
+      * ``https://www.youtube.com/watch?v=<ID>[&t=…&feature=…]``
+      * ``https://youtu.be/<ID>[?…]``
+      * ``https://www.youtube.com/shorts/<ID>[?…]``
+      * ``m.``/``www.``/``music.`` subdomains and ``youtube-nocookie.com``
+      * (tolerated, not used by MPT) ``/embed/<ID>``
+
+    Only the 11-char video ID affects identity; all other query parameters are
+    ignored.  Returns ``None`` for non-YouTube or malformed URLs so the caller
+    can fall back safely (no unsafe collision).  The returned value is a stable
+    identity token (e.g. ``"yt:<ID>"``) used to derive the deterministic cache
+    filename — it is NOT a full URL.
+    """
+    if not video_url:
+        return None
+    try:
+        parsed = urlparse(video_url)
+    except Exception:
+        return None
+    host = (parsed.netloc or "").lower().split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    if host.startswith("m."):
+        host = host[2:]
+    if host not in _YOUTUBE_HOSTS:
+        return None
+
+    if host == "youtu.be":
+        vid = parsed.path.strip("/").split("/")[0]
+    elif "/shorts/" in parsed.path:
+        vid = parsed.path.split("/shorts/")[-1].split("/")[0]
+    elif "/embed/" in parsed.path:
+        vid = parsed.path.split("/embed/")[-1].split("/")[0]
+    else:
+        qs = parse_qs(parsed.query)
+        vid = (qs.get("v") or [""])[0]
+
+    if not vid or not _YOUTUBE_ID_RE.fullmatch(vid):
+        return None
+    return f"yt:{vid}"
+
+
 def save_video_youtube(video_url: str, save_dir: str = "") -> str:
     """Download a YouTube video via yt_dlp.
 
@@ -1282,10 +1350,15 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    # Derive a deterministic filename from the URL hash (same convention as
-    # save_video so yt-dlp and HTTP downloads of the same URL are cached).
-    url_without_query = video_url.split("?")[0]
-    url_hash = utils.md5(url_without_query)
+    # Cache filename is derived from a canonical YouTube video identity so that
+    # distinct videos never collide in cache_videos/ (Phase 10H.1).  Equivalent
+    # supported URLs for the same video resolve to the same identity; non-YouTube
+    # or malformed URLs fall back to the prior URL-based key for safety.
+    identity = _youtube_video_identity(video_url)
+    if identity:
+        url_hash = utils.md5(identity)
+    else:
+        url_hash = utils.md5(video_url.split("?")[0])
     video_id = f"vid-{url_hash}"
     video_path = f"{save_dir}/{video_id}.mp4"
 
