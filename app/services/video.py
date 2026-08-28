@@ -783,19 +783,24 @@ def combine_videos(
     
     clip_files = [clip.file_path for clip in processed_clips]
     logger.info(f"concatenating {len(clip_files)} clips with ffmpeg")
-    concat_video_clips_with_ffmpeg(
-        clip_files=clip_files,
-        output_file=combined_video_path,
-        threads=threads,
-        output_dir=output_dir,
-        # Scene-aware: concat exactly the scene clips once (no max_duration
-        # cycling). Legacy path caps concat at the audio duration.
-        max_duration=None if scene_specs else audio_duration,
-    )
-    
-    # clean temp files
-    delete_files(clip_files)
-            
+    # Ensure temp clips are cleaned up regardless of whether concat succeeds,
+    # fails, or raises an unexpected exception.  The temp clips are only
+    # consumed by concat_video_clips_with_ffmpeg; deleting them in a finally
+    # block guarantees they are never left behind on the failure path.
+    try:
+        concat_video_clips_with_ffmpeg(
+            clip_files=clip_files,
+            output_file=combined_video_path,
+            threads=threads,
+            output_dir=output_dir,
+            # Scene-aware: concat exactly the scene clips once (no max_duration
+            # cycling). Legacy path caps concat at the audio duration.
+            max_duration=None if scene_specs else audio_duration,
+        )
+    finally:
+        # clean temp files — idempotent via delete_files
+        delete_files(clip_files)
+
     logger.info("video combining completed")
     return combined_video_path
 

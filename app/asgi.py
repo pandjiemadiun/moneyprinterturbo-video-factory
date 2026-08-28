@@ -40,6 +40,16 @@ async def application_lifespan(_: FastAPI):
     from app.services import task as task_service
 
     task_service.recover_interrupted_cross_posts()
+
+    # Clean stale orphan cache_videos on startup.  This reclaims abandoned
+    # YouTube/raw downloads left behind by interrupted or failed previous
+    # container runs.  The sweeper is fail-closed: it only deletes files that
+    # match known cache patterns, are older than the TTL (default 30 days),
+    # and are not referenced by any active task.
+    from app.services import material as material_service
+
+    material_service.run_startup_cleanup()
+
     try:
         yield
     finally:

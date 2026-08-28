@@ -14,8 +14,10 @@ from loguru import logger
 from moviepy.video.io.VideoFileClip import VideoFileClip
 
 from app.config import config
+from app.models import const
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode
 from app.services import material_cache, task_artifacts
+from app.services import state as sm
 from app.utils import utils
 
 try:
@@ -1784,6 +1786,22 @@ def download_videos_by_scene(
                         f"scene {scene_index}: quality gate rejected clip "
                         f"asset_id={asset_id}, visual_query={visual_query!r}"
                     )
+                    # Clean up the rejected file to prevent large unusable
+                    # downloads from permanently consuming disk space.
+                    # The file failed the quality gate for all consumers;
+                    # deleting it is safe and idempotent.
+                    try:
+                        if saved_video_path and os.path.isfile(saved_video_path):
+                            os.remove(saved_video_path)
+                            logger.info(
+                                f"cleaned up quality-rejected clip: "
+                                f"{os.path.basename(saved_video_path)}"
+                            )
+                    except OSError as cleanup_error:
+                        logger.warning(
+                            f"failed to remove quality-rejected clip "
+                            f"{saved_video_path}: {cleanup_error}"
+                        )
                     continue  # try next ranked candidate
 
                 # Success — this clip is the winner for this scene
@@ -2022,6 +2040,186 @@ def _download_videos_by_script_order(
     logger.success(f"downloaded {len(video_paths)} ordered videos")
     _persist_material_sources(task_id, material_sources)
     return video_paths
+
+
+# ─── Safe orphan cache_videos sweeper ───────────────────────────────────────
+
+# Default TTL for cached raw media in cache_videos/.  Files older than this
+# that are not referenced by an active (processing) task are eligible for
+# deletion.  30 days is conservative: long enough for any legitimate reuse
+# within a month, short enough to bound disk growth from stale downloads.
+_CACHE_VIDEOS_TTL_DAYS = 30
+
+# Patterns recognized for cleanup in cache_videos/.  Anything outside these
+# patterns is ALWAYS preserved (fail-closed for unknown filenames).
+_CACHE_VIDEOS_FILE_PATTERNS = [
+    re.compile(r"^vid-([0-9a-f]{32})\.mp4$"),
+    re.compile(r"^vid-([0-9a-f]{32})\.mp4\.part$"),
+    re.compile(r"^vid-([0-9a-f]{32})\.mp4\.ytdl$"),
+    re.compile(r"^vid-[0-9a-f]{32}\.mp4\.Frag\d+$"),
+]
+
+# File names that must NEVER be deleted by the sweeper, even if they appear
+# in cache_videos/.  These are per-task production artifacts.
+_PROTECTED_FILENAMES = {
+    "final-1.mp4", "combined-1.mp4", "audio.mp3",
+    "subtitle.srt", "script.json", "scene_timing.json",
+}
+
+# Active task states — only files referenced by tasks in these states are kept
+_ACTIVE_TASK_STATES = {const.TASK_STATE_PROCESSING}
+
+
+def _get_active_cache_references() -> set[str]:
+    """Collect the set of cache_videos filenames currently referenced by
+    active (processing) tasks.
+
+    Returns an empty set if task state cannot be reliably inspected
+    (fail-closed: empty set means 'no known references' but the caller
+    must still check age before deleting).
+    """
+    references: set[str] = set()
+    try:
+        # Page through all tasks.  Use a large page size to minimize round-trips.
+        tasks, total = sm.state.get_all_tasks(page=1, page_size=1000)
+    except Exception as e:
+        # If we cannot read task state at all (e.g. Redis unavailable, or
+        # in-memory state lost on restart), return empty.  The caller will
+        # keep all files because it cannot confirm they are unreferenced.
+        logger.debug(f"orphan sweeper: cannot read task state ({e}); "
+                     f"treating all files as potentially active")
+        return references
+
+    for task in tasks:
+        state_val = task.get("state")
+        try:
+            state_val = int(state_val)
+        except (TypeError, ValueError):
+            continue
+        if state_val not in _ACTIVE_TASK_STATES:
+            continue
+
+        # The task stores ``materials`` as a list of file paths (full paths
+        # to downloaded clips).  Extract the basename for cache lookup.
+        materials = task.get("materials")
+        if not isinstance(materials, list):
+            continue
+        for mat_path in materials:
+            if isinstance(mat_path, str) and mat_path:
+                references.add(os.path.basename(mat_path))
+
+    return references
+
+
+def cleanup_orphan_cache_videos(
+    cache_dir: str | None = None,
+    ttl_days: int = _CACHE_VIDEOS_TTL_DAYS,
+) -> int:
+    """Remove stale, unreferenced files from ``cache_videos/``.
+
+    Recognizes only expected temporary/cache patterns:
+    ``vid-{32-hex}.mp4``, ``.part``, ``.ytdl``, ``.Frag*``.
+    Production artifacts (``final-*``, ``combined-*``, ``audio.mp3``, etc.)
+    and unknown files are never deleted.
+
+    For each candidate:
+      1. Verify it is a regular file.
+      2. Verify filename matches an allowed pattern.
+      3. Check age — keep if younger than ``ttl_days``.
+      4. If older than TTL, check if referenced by an active task.
+      5. If actively referenced: KEEP.
+      6. If not actively referenced: DELETE.
+      7. Unknown/unrecognized files: KEEP (fail-closed).
+      8. Any inspection error: KEEP.
+      9. Any deletion error: log warning, continue.
+
+    Returns the number of files deleted.
+    """
+    if cache_dir is None:
+        cache_dir = utils.storage_dir("cache_videos")
+
+    if not os.path.isdir(cache_dir):
+        return 0
+
+    # Collect active references for the fail-closed KEEP rule.
+    active_refs = _get_active_cache_references()
+
+    ttl_seconds = ttl_days * 86400
+    now = time.time()
+    deleted_count = 0
+
+    try:
+        entries = os.listdir(cache_dir)
+    except OSError as e:
+        logger.warning(
+            f"orphan sweeper: cannot list cache_videos ({e}); skipping"
+        )
+        return 0
+
+    for filename in entries:
+        # Absolute safety: never touch protected filenames
+        if filename in _PROTECTED_FILENAMES:
+            continue
+
+        filepath = os.path.join(cache_dir, filename)
+
+        # 1. Verify it is a regular file
+        try:
+            if not os.path.isfile(filepath):
+                continue
+        except OSError:
+            continue
+
+        # 2. Verify filename matches an allowed pattern
+        if not any(p.match(filename) for p in _CACHE_VIDEOS_FILE_PATTERNS):
+            # 8. Unknown/unrecognized files: KEEP
+            continue
+
+        # 3. Check age
+        try:
+            mtime = os.path.getmtime(filepath)
+        except OSError as e:
+            # 9. Any inspection error: KEEP
+            logger.debug(
+                f"orphan sweeper: cannot stat {filename} ({e}); keeping"
+            )
+            continue
+
+        age_seconds = now - mtime
+        if age_seconds < ttl_seconds:
+            # 4. Younger than TTL: KEEP
+            continue
+
+        # 5. Check active references (fail-closed)
+        if filename in active_refs:
+            continue
+
+        # 6. DELETE
+        try:
+            os.remove(filepath)
+            deleted_count += 1
+            logger.info(f"orphan sweeper: deleted stale cache file {filename}")
+        except OSError as e:
+            # 10. Any deletion error: log warning, continue
+            logger.warning(
+                f"orphan sweeper: failed to delete {filepath}: {e}"
+            )
+
+    return deleted_count
+
+
+def run_startup_cleanup() -> None:
+    """Run all safe startup-time cleanup tasks.
+
+    Called from the ASGI lifespan on application startup.
+    Currently cleans orphan cache_videos/ files.
+    """
+    try:
+        deleted = cleanup_orphan_cache_videos()
+        if deleted > 0:
+            logger.info(f"startup cleanup: deleted {deleted} orphan cache files")
+    except Exception as e:
+        logger.warning(f"startup cleanup: sweeper error (safely ignored): {e}")
 
 
 if __name__ == "__main__":
