@@ -1367,7 +1367,13 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
         return video_path
 
     ydl_opts = {
-        "format": "best[ext=mp4][height<=720]",
+        # Phase 10H.2: prefer the highest-quality MP4/H.264 video stream <=720p
+        # plus compatible AAC audio, merged into an MP4 container.  The previous
+        # "best[ext=mp4][height<=720]" selected progressive 360p (format 18)
+        # because yt-dlp's `best` prefers complete streams over higher-quality
+        # DASH video-only formats.  The fallback "/best" keeps a safe progressive
+        # download when no H.264 DASH stream <=720p is available.
+        "format": "bestvideo[vcodec^=avc1][ext=mp4][height<=720]+bestaudio[acodec^=mp4a]/best",
         "outtmpl": video_path,
         "quiet": True,
         "no_warnings": True,
