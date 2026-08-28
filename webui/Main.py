@@ -1620,6 +1620,19 @@ def render_onboarding_tour():
         tour.start()
 
 
+def _youtube_error_message(error: str, failed_stage: str | None) -> str:
+    """Translate YouTube failure patterns into user-friendly messages."""
+    error_lower = error.lower()
+    if failed_stage == "materials":
+        if "no" in error_lower and ("found" in error_lower or "result" in error_lower):
+            return tr("YouTube Error No Results")
+        if "quality" in error_lower or "resolution" in error_lower:
+            return tr("YouTube Error Quality")
+        if "download" in error_lower or "403" in error_lower:
+            return tr("YouTube Error Download")
+    return tr("Video Generation Failed")
+
+
 def _render_generation_logs(task_id):
     """渲染后台任务日志快照，不从工作线程访问 Streamlit 会话状态。"""
     if config.ui.get("hide_log", False):
@@ -1643,6 +1656,13 @@ def _render_generation_task_snapshot(task_id, task):
     progress = max(0, min(100, int(task.get("progress", 0) or 0)))
     if state == const.TASK_STATE_PROCESSING:
         st.info(tr("Generating Video"))
+        if task.get("video_source") == "youtube":
+            if progress < 30:
+                st.caption(tr("YouTube Progress Search"))
+            elif progress < 60:
+                st.caption(tr("YouTube Progress Download"))
+            else:
+                st.caption(tr("YouTube Progress Quality"))
         st.progress(
             progress,
             text=f"{tr('Task Progress')}: {progress}%",
@@ -1652,8 +1672,12 @@ def _render_generation_task_snapshot(task_id, task):
 
     if state == const.TASK_STATE_FAILED:
         error = str(task.get("error") or "").strip()
-        message = tr("Video Generation Failed")
-        st.error(f"{message}: {error}" if error else message)
+        failed_stage = task.get("failed_stage")
+        if task.get("video_source") == "youtube":
+            message = _youtube_error_message(error, failed_stage)
+        else:
+            message = tr("Video Generation Failed")
+        st.error(f"{message}: {error}" if error and message == tr("Video Generation Failed") else message if message else f"{tr('Video Generation Failed')}: {error}")
         _render_generation_logs(task_id)
         return
 
@@ -3590,7 +3614,6 @@ def _render_script_settings(panel, params):
                 icon=":material/auto_awesome:",
             ):
                 if not params.video_script:
-                    # 视频关键词需要基于文案提取，文案为空时提前提示并跳过模型调用。
                     st.toast(tr("Please Enter the Video Subject"))
                     st.warning(tr("Please Enter the Video Subject"))
                 else:
@@ -3610,9 +3633,17 @@ def _render_script_settings(panel, params):
                         else:
                             st.session_state["video_terms"] = ", ".join(terms)
 
+            _video_source_for_keywords = config.app.get("video_source", "pexels")
+            if _video_source_for_keywords == "youtube":
+                keywords_label = tr("YouTube Keywords Label")
+                keywords_help = tr("YouTube Keywords Help")
+            else:
+                keywords_label = tr("Video Keywords")
+                keywords_help = tr("Video Keywords Help")
+
             params.video_terms = st.text_area(
-                tr("Video Keywords"),
-                help=tr("Video Keywords Help"),
+                keywords_label,
+                help=keywords_help,
                 key="video_terms",
             )
 
@@ -5658,11 +5689,17 @@ def _render_generation_controls(
             st.stop()
 
         if params.video_source == "local" and not has_local_materials:
-            # 本地素材为空时继续执行会先产生 TTS/字幕，最后才在素材预处理阶段失败。
-            # 在任务启动前拦截，可以避免无意义的 API 调用和中间文件。
             _remove_active_generation_task(task_id)
             st.error(tr("Please Upload Local Materials First"))
             st.stop()
+
+        if params.video_source == "youtube":
+            _yt_terms = str(params.video_terms or "").strip()
+            _yt_script = str(params.video_script or "").strip()
+            if not _yt_terms and not _yt_script:
+                _remove_active_generation_task(task_id)
+                st.error(tr("YouTube Empty Query"))
+                st.stop()
 
         if voice_mode == VOICE_MODE_UPLOAD and not uploaded_audio_file:
             # 上传音频是用户显式选择的配音方式，缺少文件时不能静默退回 TTS。
