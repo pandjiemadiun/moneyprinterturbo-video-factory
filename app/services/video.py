@@ -582,6 +582,11 @@ def combine_videos(
     video_width, video_height = aspect.to_resolution()
 
     processed_clips = []
+    # Track every temp-clip file path as soon as it is created. A clip whose
+    # encoding fails is never added to `processed_clips`, so without this list
+    # the early "no clips available" return (and the failure paths) would leak
+    # the orphan temp file. See Phase 10I DEFECT-1.
+    temp_clip_paths = []
     subclipped_items = []
     video_duration = 0
     for idx, video_path in enumerate(video_paths):
@@ -731,6 +736,7 @@ def combine_videos(
                 
             # wirte clip to temp file
             clip_file = f"{output_dir}/temp-clip-{i+1}.mp4"
+            temp_clip_paths.append(clip_file)
             _write_videofile_with_codec_fallback(
                 clip,
                 clip_file,
@@ -779,6 +785,9 @@ def combine_videos(
     logger.info("starting clip merging process")
     if not processed_clips:
         logger.warning("no clips available for merging")
+        # All clips failed to encode; clean up any temp files we created so a
+        # failed clip does not leak as an orphan (Phase 10I DEFECT-1).
+        delete_files(temp_clip_paths)
         return combined_video_path
     
     clip_files = [clip.file_path for clip in processed_clips]
@@ -798,8 +807,12 @@ def combine_videos(
             max_duration=None if scene_specs else audio_duration,
         )
     finally:
-        # clean temp files — idempotent via delete_files
-        delete_files(clip_files)
+        # clean temp files — idempotent via delete_files. Combine the
+        # successfully-processed clip paths with every temp file we created
+        # (including any whose encoding failed before it could be added to
+        # processed_clips) so a failed clip never leaks as an orphan
+        # (Phase 10I DEFECT-1).
+        delete_files(clip_files + temp_clip_paths)
 
     logger.info("video combining completed")
     return combined_video_path

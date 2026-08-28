@@ -638,3 +638,180 @@ def test_N_large_rejected_file_deletion_path(tmp_path, monkeypatch):
     prot = cache / "final-1.mp4"
     prot.write_bytes(b"x" * 1024)
     assert prot.exists() is True
+
+
+# ---------------------------------------------------------------------------
+# PHASE 10I.1 — DEFECT-1 REGRESSION (failed encoding temp-clip cleanup)
+# ---------------------------------------------------------------------------
+
+def _probe_dims(path: Path):
+    import json as _json
+    out = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(path)],
+        capture_output=True, text=True, check=True,
+    )
+    data = _json.loads(out.stdout)
+    for s in data.get("streams", []):
+        if s.get("codec_type") == "video":
+            return int(s["width"]), int(s["height"])
+    return None
+
+
+def test_defect1_A_encoding_failure_cleans_temp_clip(tmp_path, monkeypatch):
+    """RED/GREEN core: an encoding failure must NOT leave an orphan
+    temp-clip-*.mp4 behind."""
+    clip = tmp_path / "src.mp4"
+    _make_mp4(clip, 640, 360)
+    silence = tmp_path / "silence.wav"
+    _make_silence(silence)
+    out = tmp_path / "combined_1080x1920.mp4"
+
+    import app.services.video as video_mod
+
+    def boom(clip_obj, clip_file, *a, **k):
+        Path(clip_file).write_bytes(b"\x00" * 1024)  # partial left by ffmpeg
+        raise RuntimeError("simulated encode failure")
+
+    monkeypatch.setattr(video_mod, "_write_videofile_with_codec_fallback", boom)
+    try:
+        combine_videos(
+            combined_video_path=str(out),
+            video_paths=[str(clip)],
+            audio_file=str(silence),
+            video_aspect=VideoAspect.portrait,
+            max_clip_duration=5,
+            video_transition_mode=None,
+        )
+    except Exception:
+        pass
+    assert list(tmp_path.glob("temp-clip-*.mp4")) == [], "orphan temp clip leaked"
+
+
+def test_defect1_B_concat_failure_cleans_temp_clips(tmp_path, monkeypatch):
+    clip = tmp_path / "src.mp4"
+    _make_mp4(clip, 640, 360)
+    silence = tmp_path / "silence.wav"
+    _make_silence(silence)
+    out = tmp_path / "combined_1080x1920.mp4"
+    protected = tmp_path / "combined-1.mp4"
+    _make_mp4(protected, 1080, 1920)
+
+    def boom(*a, **k):
+        raise RuntimeError("simulated ffmpeg concat failure")
+
+    monkeypatch.setattr(_video_module(), "concat_video_clips_with_ffmpeg", boom)
+    with pytest.raises(RuntimeError):
+        combine_videos(
+            combined_video_path=str(out),
+            video_paths=[str(clip)],
+            audio_file=str(silence),
+            video_aspect=VideoAspect.portrait,
+            max_clip_duration=5,
+            video_transition_mode=None,
+        )
+    assert list(tmp_path.glob("temp-clip-*.mp4")) == []
+    assert not (tmp_path / "ffmpeg-concat-list.txt").exists()
+    assert protected.exists()
+
+
+def test_defect1_C_successful_concat_cleans_temp_clips(tmp_path, monkeypatch):
+    clip = tmp_path / "src.mp4"
+    _make_mp4(clip, 640, 360)
+    silence = tmp_path / "silence.wav"
+    _make_silence(silence)
+    out = tmp_path / "combined_1080x1920.mp4"
+    combine_videos(
+        combined_video_path=str(out),
+        video_paths=[str(clip)],
+        audio_file=str(silence),
+        video_aspect=VideoAspect.portrait,
+        max_clip_duration=5,
+        video_transition_mode=None,
+    )
+    assert out.exists()
+    w, h = _probe_dims(out)
+    assert (w, h) == (1080, 1920)
+    # successful path must also clean temp clips
+    assert list(tmp_path.glob("temp-clip-*.mp4")) == []
+    assert not (tmp_path / "ffmpeg-concat-list.txt").exists()
+
+
+def test_defect1_D_multiple_clips_one_encodes_fails_cleans_all(tmp_path, monkeypatch):
+    clips = [tmp_path / f"src{i}.mp4" for i in range(3)]
+    for c in clips:
+        _make_mp4(c, 640, 360)
+    silence = tmp_path / "silence.wav"
+    _make_silence(silence)
+    out = tmp_path / "combined_1080x1920.mp4"
+
+    import app.services.video as video_mod
+
+    calls = {"n": 0}
+
+    def boom(clip_obj, clip_file, *a, **k):
+        calls["n"] += 1
+        if calls["n"] == 2:  # second clip fails to encode
+            Path(clip_file).write_bytes(b"\x00" * 1024)
+            raise RuntimeError("encode fail on clip 2")
+        # real write for other clips is bypassed; emulate success minimally
+        # (the function is mocked, so nothing is actually written)
+
+    monkeypatch.setattr(video_mod, "_write_videofile_with_codec_fallback", boom)
+    try:
+        combine_videos(
+            combined_video_path=str(out),
+            video_paths=[str(c) for c in clips],
+            audio_file=str(silence),
+            video_aspect=VideoAspect.portrait,
+            max_clip_duration=5,
+            video_transition_mode=None,
+        )
+    except Exception:
+        pass
+    # ALL temp-clip files (1,2,3) must be gone, including the failed one
+    assert list(tmp_path.glob("temp-clip-*.mp4")) == [], "not all temp clips cleaned"
+
+
+def test_defect1_E_missing_temp_file_idempotent(tmp_path):
+    # delete_files must not raise on an already-removed temp file
+    f = tmp_path / "temp-clip-1.mp4"
+    f.write_bytes(b"\x00" * 1024)
+    from app.services.video import delete_files
+    delete_files(str(f))  # first
+    delete_files(str(f))  # second (already gone) must not raise
+
+
+def test_defect1_F_unrelated_files_not_removed(tmp_path, monkeypatch):
+    clip = tmp_path / "src.mp4"
+    _make_mp4(clip, 640, 360)
+    silence = tmp_path / "silence.wav"
+    _make_silence(silence)
+    out = tmp_path / "final-1.mp4"
+    combined = tmp_path / "combined-1.mp4"
+    audio = tmp_path / "audio.mp3"
+    subtitle = tmp_path / "subtitle.srt"
+    script = tmp_path / "script.json"
+    for f in (combined, out):
+        _make_mp4(f, 1080, 1920)
+    audio.write_bytes(b"x" * 1024)
+    subtitle.write_bytes(b"x" * 1024)
+    script.write_bytes(b"{}")
+
+    def boom(*a, **k):
+        raise RuntimeError("simulated final render failure")
+
+    monkeypatch.setattr(_video_module(), "concat_video_clips_with_ffmpeg", boom)
+    with pytest.raises(RuntimeError):
+        combine_videos(
+            combined_video_path=str(out),
+            video_paths=[str(clip)],
+            audio_file=str(silence),
+            video_aspect=VideoAspect.portrait,
+            max_clip_duration=5,
+            video_transition_mode=None,
+        )
+    # permanent / unrelated artifacts must survive cleanup
+    assert combined.exists() and out.exists() and audio.exists()
+    assert subtitle.exists() and script.exists()
+    assert list(tmp_path.glob("temp-clip-*.mp4")) == []
+    assert not (tmp_path / "ffmpeg-concat-list.txt").exists()
