@@ -11,7 +11,8 @@ All 17 sections completed. Phase 10C cleanup implementation successfully deploye
 | Checkpoint | Value | Source |
 |---|---|---|
 | Git status (host) | Clean (pre-commit) | `git status` |
-| HEAD (host) | `adf701c` — "fix: safely clean temporary media artifacts" | `git log --oneline -1` |
+| HEAD (host, at baseline start) | `adf701c` — "fix: safely clean temporary media artifacts" | `git log --oneline -1` |
+| HEAD (host, at final verification) | `05e25a4` — "docs: Phase 10D final report" | `git rev-parse HEAD` |
 | HEAD contains Phase 10C commit | `adf701c442f01d3b1b130a03d6926f014d9cc1ee` | `git cat-file -t` = `commit` |
 | factory.db SHA256 | Not a persistent DB; state is `MemoryState` (in-process, not file-backed) | `sm.state` type = `MemoryState` |
 | factory.db size | N/A — no factory.db file in production container | `find / -name factory.db` |
@@ -313,10 +314,26 @@ SHA256: `2a8d89a696ff5564703547e86c198d846370399de3ae3a5e105c0784d26c7f45` — u
 | Health check | No healthcheck configured (container uses process liveness) |
 
 ### Startup cleanup verification
-- Container started at `04:49:20Z` (after Phase 10C commit at `04:38:31Z`)
-- `application_lifespan()` logged "startup event" at `04:49:21`
-- `run_startup_cleanup()` was called — no sweeper errors logged
-- cache_videos was empty (0 files), so 0 files deleted (clean run)
+Application lifespan (asgi.py:23):
+```python
+@contextmanager
+def application_lifespan(app: FastAPI):
+    logger.info("startup event")
+    ...
+    material_service.run_startup_cleanup()  # asgi.py:51
+    yield
+    ...
+    logger.info("shutdown event")
+```
+Container started at `04:49:20Z` → startup event logged at `04:49:21` → `run_startup_cleanup()` invoked at `04:49:21`.
+
+**Important clarification**: Production `cache_videos/` contained 0 files at startup, so the sweeper deleted 0 files. This confirms the startup hook executed without error — it does NOT constitute a production deletion exercise. The actual deletion logic was verified independently via isolated runtime fixtures (Sections 8-9) using temporary directories.
+
+| Claim | Precise wording |
+|---|---|
+| Startup hook execution | ✅ PASS — `run_startup_cleanup()` invoked from `application_lifespan()`, no errors, no crash, exit 0 |
+| Production deletion exercised | ⛔ NOT PERFORMED (by design) — production cache was empty; no production media deleted |
+| Deletion logic verified | ✅ PASS — via isolated temp-dir fixtures (Sections 8, 9) |
 
 ---
 
@@ -324,10 +341,17 @@ SHA256: `2a8d89a696ff5564703547e86c198d846370399de3ae3a5e105c0784d26c7f45` — u
 
 ### Host (repository)
 ```
-Current HEAD: 70fbd9d test: fix temp clip cleanup test fixture (proper mock dimensions + ValueError scenario)
-Parent:       adf701c fix: safely clean temporary media artifacts
-Working tree: Clean ✅
+HEAD at baseline start:  adf701c fix: safely clean temporary media artifacts
+HEAD at final verify:     05e25a4 docs: Phase 10D final report
+Working tree:             Clean ✅
 ```
+
+**Note on HEAD evolution**: During Phase 10D, the host working tree evolved through three commits:
+1. `adf701c` — Phase 10C (pre-existing, was HEAD at baseline start)
+2. `70fbd9d` — Phase 10D test fixture fix
+3. `05e25a4` — Phase 10D final report commit
+
+Section 1 records the HEAD at the *start* of baseline (`$ adf701c`). Section 15 records the HEAD at *final verification* (`$ 05e25a4`). This is not a contradiction — the git history advanced as Phase 10D work was committed, which is expected and correct.
 
 ### Container
 The container does not have a `.git` directory — source was deployed via `docker cp` into the container's writable layer. This is the existing deployment method (not a new architecture).
@@ -336,7 +360,22 @@ The container does not have a `.git` directory — source was deployed via `dock
 | Commit | SHA | Description |
 |---|---|---|
 | `adf701c` | `adf701c442f01d3b1b130a03d6926f014d9cc1ee` | Phase 10C: fix: safely clean temporary media artifacts |
-| `70fbd9d` | *(new)* | test: fix temp clip cleanup test fixture |
+| `70fbd9d` | *(see `git log`)* | test: fix temp clip cleanup test fixture |
+| `05e25a4` | *(see `git log`)* | docs: Phase 10D final report |
+
+### Authoritative final state
+```
+$ git rev-parse HEAD
+05e25a4...  (docs: Phase 10D final report)
+
+$ git log --oneline -3
+05e25a4 docs: Phase 10D final report
+70fbd9d test: fix temp clip cleanup test fixture (proper mock dimensions + ValueError scenario)
+adf701c fix: safely clean temporary media artifacts
+
+$ git status --short
+(empty)
+```
 
 ---
 
@@ -352,10 +391,10 @@ The container does not have a `.git` directory — source was deployed via `dock
 | Production data | Unchanged |
 
 ### Rollback capability
-- **Source**: Phase 10C code is in the container's writable layer. To rollback, restart the container (source overlays are discarded; the base image is restored).
-- **Data**: All production data is bind-mounted from host (`config.toml`, `storage`). Container restart preserves all data.
-- **Code**: Phase 10C changes are committed; Phase 10D test fixture changes are committed.
-- **No irreversible changes**: No production files were created, modified, or deleted.
+- **Source state in container**: Phase 10C code is in the container's writable layer (deployed via `docker cp`). `docker restart` does **NOT** clear the writable layer — the overlay persists across restarts. To truly revert the container's source state, the container must be **removed and recreated** from the base image (`mpt-youtube-ejs:latest`, image sha256: `afd296c29a709f70605750c765f8c4e3e350d6bbd5a8eb4769113be832043327`).
+- **Data state**: All production data is bind-mounted from host (`config.toml`, `storage`). Container removal/recreation preserves all bind-mounted data. No data is stored in the container's writable layer.
+- **Git state**: Phase 10C (commit `adf701c`) is committed and available on the host. The container can be recreated from the base image and Phase 10C applied again via the existing `docker cp` deployment method.
+- **No irreversible changes**: No production files were created, modified, or deleted. Rollback procedure: `docker rm moneyprinterturbo-api && docker run ...` (recreate from base image, then re-apply Phase 10C source via `docker cp` if desired).
 
 ---
 
@@ -365,7 +404,7 @@ The container does not have a `.git` directory — source was deployed via `dock
 
 | Section | Status | Notes |
 |---|---|---|
-| 1. Pre-deployment baseline | PASS | All 14 baselines recorded |
+| 1. Pre-deployment baseline | PASS | All 14 baselines recorded (HEAD noted at start = `adf701c`, at final = `05e25a4`) |
 | 2. Commit content verification | PASS | All 5 elements verified present, 8 elements verified absent |
 | 3. Production cache dry run | PASS | 0 files, empty directory |
 | 4. Deployment artifact | PASS | Existing `docker cp` method, no new architecture |
@@ -379,9 +418,9 @@ The container does not have a `.git` directory — source was deployed via `dock
 | 12. Production activity | PASS | Zero production activity |
 | 13. Production invariants | PASS | All 14 invariants unchanged |
 | 14. Container health | PASS | Running, healthy, exit 0, 0 restarts |
-| 15. Git state | PASS | HEAD = Phase 10C, working tree clean |
-| 16. Rollback status | PASS | Full rollback capability documented |
-| 17. Final report | PASS | This report |
+| 15. Git state | PASS | HEAD evolved from `adf701c` → `05e25a4`; working tree clean |
+| 16. Rollback status | PASS (clarified) | Rollback = container recreate, not restart; data preserved via bind-mounts |
+| 17. Final report | PASS | This report (corrected) |
 
 ### Constraints honored
 - ✅ Did not modify `factory.db` production (not file-backed; MemoryState)
@@ -403,3 +442,16 @@ The container does not have a `.git` directory — source was deployed via `dock
 | `test/services/test_media_cleanup.py` | Fixed mock fixture (portrait dimensions), replaced encoding failure test with unexpected exception test |
 
 No source files were modified during Phase 10D — only test fixture improvements that make the tests properly exercise the `try/finally` cleanup logic.
+
+### Adendum: Sweeper scope design note
+
+**cache_videos is an ephemeral cache, not a permanent task artifact.**
+
+The orphan sweeper (`cleanup_orphan_cache_videos`) deletes files older than 30 days (TTL) that are not referenced by any *currently active* task. Files referenced only by *completed historical* tasks will be deleted after TTL expires if that task is no longer in `PROCESSING` state.
+
+This is acceptable by design:
+- `cache_videos/` is a download cache for video source material, not a permanent archive.
+- Final MP4s (`final-*.mp4`), combined videos (`combined-*.mp4`), audio, subtitles, and scripts live in `storage/tasks/<task_id>/` and are **never** touched by the sweeper.
+- If a historical task's `script.json` references `vid-X.mp4` and that file has been cleaned, the task metadata still records what was used — the source file is simply no longer cached locally.
+
+This distinction was confirmed in the isolated runtime test (Section 8): `vid-ccc...ccc.mp4` (old + active task) was kept, while `vid-aaa...aaa.mp4` (old + unreferenced) was deleted. The sweeper correctly distinguishes "active reference" from "no reference."
