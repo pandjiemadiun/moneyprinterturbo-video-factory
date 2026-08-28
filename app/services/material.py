@@ -1179,6 +1179,89 @@ def save_video(video_url: str, save_dir: str = "") -> str:
 _MATERIAL_MIN_WIDTH = 480
 _MATERIAL_MIN_HEIGHT = 480
 
+# ─── Output-aware quality gate (Phase 10F) ────────────────────────────────────
+#
+# Minimum effective source dimension (in pixels) that must remain after the
+# actual 9:16 scale-to-cover + crop transformation used by combine_videos().
+# This replaces the blunt ``w < 480 OR h < 480'' check for the post-download
+# quality gate, allowing e.g. 854×480 landscape to pass when its *effective*
+# source resolution (270 after scale-to-cover) comfortably exceeds 250, while
+# still rejecting 640×360 (effective 202) and 320×180 (effective 101).
+#
+# The threshold 250 was established by the Phase 10E mathematical model and
+# approved by the Phase 10F design spike.
+#
+# NOTE: ``_MATERIAL_MIN_WIDTH`` / ``_MATERIAL_MIN_HEIGHT`` are intentionally
+# retained — they are still used as a pre-download filter in rank_videos()
+# (see line ~1380).  They are NOT silently removed.
+_EFFECTIVE_MIN_DIMENSION = 250.0
+
+
+def _validate_reframe_resolution(
+    width: int,
+    height: int,
+    target_width: int,
+    target_height: int,
+    min_effective_dimension: float = _EFFECTIVE_MIN_DIMENSION,
+) -> bool:
+    """Determine whether a source resolution is sufficient for the actual
+    9:16 target output *after* the pipeline's proportional scale-to-cover + crop.
+
+    This implements the same mathematical model used by ``combine_videos()``
+    in ``app/services/video.py`` (scale-to-cover via moviepy ``.resized()``
+    followed by center-crop).  Instead of requiring both source dimensions to
+    be ≥ 480, it checks the *effective* source pixels that survive the
+    transformation.
+
+    Algorithm (mirrors video.py:676-700):
+
+        src_ratio   = width  / height
+        target_ratio = target_width / target_height
+
+        if src_ratio > target_ratio:
+            # source is wider than target → scale by height
+            scale = target_height / height
+        else:
+            # source is taller/same → scale by width
+            scale = target_width / width
+
+        effective_src_w = target_width  / scale
+        effective_src_h = target_height / scale
+        effective_min   = min(effective_src_w, effective_src_h)
+
+    Accept if ``effective_min >= min_effective_dimension``.
+
+    Parameters
+    ----------
+    width, height :
+        Source clip dimensions (pixels).  Must be positive.
+    target_width, target_height :
+        Target output dimensions, resolved from ``VideoAspect.to_resolution()``
+        by the caller — never hard-coded inside this helper.
+    min_effective_dimension :
+        Floor for the smallest effective source dimension (default 250.0).
+    """
+    if width <= 0 or height <= 0:
+        return False
+    if target_width <= 0 or target_height <= 0:
+        return False
+
+    src_ratio = width / height
+    target_ratio = target_width / target_height
+
+    if src_ratio > target_ratio:
+        # Source is wider than target → constrained by height
+        scale = target_height / height
+    else:
+        # Source is taller or equal → constrained by width
+        scale = target_width / width
+
+    effective_src_w = target_width / scale
+    effective_src_h = target_height / scale
+    effective_min = min(effective_src_w, effective_src_h)
+
+    return effective_min >= min_effective_dimension
+
 
 def save_video_youtube(video_url: str, save_dir: str = "") -> str:
     """Download a YouTube video via yt_dlp.
@@ -1250,14 +1333,30 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
 
 
 def _validate_downloaded_clip(video_path: str,
-                               min_duration: int = 0) -> bool:
+                               min_duration: int = 0,
+                               video_aspect: VideoAspect = VideoAspect.portrait) -> bool:
     """Quality-gate: verify a downloaded clip is playable and meets minimum
     requirements.  Uses ffprobe + moviepy to check:
 
     * File exists and size > 0
-    * Has a video stream with codec (h264/h265)
     * Duration > 0 and fps > 0
-    * Width × Height >= _MATERIAL_MIN_WIDTH × _MATERIAL_MIN_HEIGHT
+    * Source resolution is sufficient to produce the target 9:16 output
+      without excessive pixelation, using the output-aware effective-resolution
+      model (Phase 10F).  See ``_validate_reframe_resolution()``.
+
+    The pre-download filter in ``rank_videos()`` still uses
+    ``_MATERIAL_MIN_WIDTH`` / ``_MATERIAL_MIN_HEIGHT`` as a coarse safety net.
+
+    Parameters
+    ----------
+    video_path :
+        Local path to the downloaded clip.
+    min_duration :
+        Minimum acceptable duration in seconds (0 = no duration check).
+    video_aspect :
+        Target VideoAspect (``VideoAspect.portrait``, ``.landscape``, or
+        ``.square``).  Default is ``portrait`` (1080×1920) — the canonical
+        TikTok/Reels target.
 
     Returns True if the clip passes all checks.
     """
@@ -1280,10 +1379,14 @@ def _validate_downloaded_clip(video_path: str,
         logger.warning(f"quality gate: zero duration/fps for {video_path}")
         return False
 
-    if w < _MATERIAL_MIN_WIDTH or h < _MATERIAL_MIN_HEIGHT:
+    # Phase 10F: output-aware effective-resolution gate.
+    # Resolve canonical target dimensions from VideoAspect (not hard-coded).
+    target_w, target_h = video_aspect.to_resolution()
+    if not _validate_reframe_resolution(w, h, target_w, target_h):
         logger.warning(
-            f"quality gate: resolution {w}x{h} below minimum "
-            f"{_MATERIAL_MIN_WIDTH}x{_MATERIAL_MIN_HEIGHT} for {video_path}"
+            f"quality gate: source resolution {w}x{h} yields effective "
+            f"source dimension below {_EFFECTIVE_MIN_DIMENSION} "
+            f"for target {target_w}x{target_h} — {video_path}"
         )
         return False
 
@@ -1780,7 +1883,8 @@ def download_videos_by_scene(
 
                 # Quality gate: validate the downloaded clip
                 if not _validate_downloaded_clip(
-                    saved_video_path, min_duration=max_clip_duration
+                    saved_video_path, min_duration=max_clip_duration,
+                    video_aspect=video_aspect
                 ):
                     logger.warning(
                         f"scene {scene_index}: quality gate rejected clip "

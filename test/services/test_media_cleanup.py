@@ -624,12 +624,18 @@ class TestYouTubeProviderUnchanged(unittest.TestCase):
         self.assertLess(save_idx, youtube_idx,
                         "save_video (HTTP) must be tried before save_video_youtube")
 
-    def test_validate_downloaded_clip_unchanged(self):
-        """Verify the quality gate logic is unchanged."""
+    def test_validate_downloaded_clip_uses_output_aware_gate(self):
+        """Verify the quality gate uses the Phase 10F output-aware resolution check."""
         import inspect
         source = inspect.getsource(mat._validate_downloaded_clip)
-        self.assertIn("w < _MATERIAL_MIN_WIDTH or h < _MATERIAL_MIN_HEIGHT", source)
+        # Must still check file existence
         self.assertIn("os.path.exists(video_path)", source)
+        # Must NOT use the old raw dimension check
+        self.assertNotIn("w < _MATERIAL_MIN_WIDTH or h < _MATERIAL_MIN_HEIGHT", source)
+        # Must use the new output-aware helper
+        self.assertIn("_validate_reframe_resolution", source)
+        # Must resolve target dimensions from VideoAspect (not hard-coded)
+        self.assertIn("video_aspect.to_resolution()", source)
 
 
 # ─────────────────────────────────────────────────────────────────────
