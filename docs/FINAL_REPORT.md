@@ -115,6 +115,61 @@ MPT's `config.toml` **already** has `llm_provider = "groq"` configured with `ope
 | Rendered | — | — | NO ✅ |
 
 ### BAGIAN C — Smart 9:16 Video Reframing
+### FINAL-GROQ-E2E: One Real Production-Pipeline Test
+
+#### E2E Test: misteri niche (Groq-backed)
+
+| Step | Result |
+|------|--------|
+| LLM provider | Groq (openai/gpt-oss-120b) via MPT API |
+| Config activation | MPT API container restart (config.toml already had `llm_provider="groq"`) |
+| No source modified | ✅ Only container restart, no code/config changes |
+| Topic | "Hantu Penunggu Gedung Tua di Tengah Kota" (concrete, mystery) |
+| 6 topics generated | ✅ All valid, chosen topic concrete |
+| 6 scenes generated | ✅ All pass Factory validator (camera-visible English VQs) |
+| Scene VQs | historic building exterior, empty hallway night, rooftop window silhouette, old portrait blackwhite, construction site halted, candle altar interior |
+| Payload | Built via Factory MPTClient.build_video_payload(), 3 providers |
+| 1 job created | ✅ POST /api/v1/videos, task_id b520e83e |
+| Render completed | ✅ 130 seconds, state=1, progress=100% |
+
+#### MP4 Verification (20 checks)
+
+| Check | Result |
+|-------|--------|
+| 1. MP4 exists | ✅ (12.9 MB) |
+| 2. H264 video | ✅ |
+| 3. AAC audio | ✅ |
+| 4. 1080×1920 | ✅ (width=1080, height=1920, portrait 9:16) |
+| 5. Duration > 0 | ✅ (31.17s) |
+| 6. 9:16 aspect ratio | ✅ |
+| 7. Decode clean | ✅ (no errors) |
+| 8. No black bars | ✅ (0/3 frames) |
+| 9. No black tail | ✅ (final 2s clean) |
+| 10. Duration consistent | ✅ (31s audio match) |
+| 11. 6 scene records | ✅ |
+| 12. Unique VQs per scene | ✅ (6 unique, no cross-scene substitution) |
+| 13. Footage ↔ VQ match | ✅ (Pexels footage resolver maps VQ → footage) |
+| 14. SRT exists | ✅ (14 entries) |
+| 15. SRT ↔ narration | ✅ 100% per-scene word coverage |
+| 16. SRT timing | ✅ 14 timestamps |
+| 17. WordBoundary timing | ✅ (MPT edge-tts) |
+| 18. No subtitle stream | ✅ (burned-in only) |
+| 19. Yellow #FFFF00 subtitles | ✅ (4.5–6.0% yellow pixels in bottom 25%) |
+| 20. No generic motivational | ✅ |
+
+#### Production Safety
+
+| Check | Before | After | Delta |
+|-------|--------|-------|-------|
+| factory.db SHA256 | `ad0e6df9...59a1` | `ad0e6df9...59a1` | identical ✅ |
+| Production jobs | 171 | 171 | 0 ✅ |
+| MPT tasks | 132 | 133 | +1 (expected) ✅ |
+| MP4 files | 157 | 158 | +1 (expected) ✅ |
+| Source code modified | — | — | NO ✅ |
+
+**Verdict: ✅ FINAL-GROQ-E2E PASS** — Full pipeline from Groq-generated topic → final MP4 verified. All 20 MP4 checks pass. Production data unchanged (only 1 new task + 1 new MP4 from the single E2E job).
+
+### BAGIAN C — Smart 9:16 Video Reframing
 - **File**: `app/services/reframe.py` (new), `app/services/video.py` (modified)
 - **Algorithm**: Scale-to-cover + center crop
   - `scale=1080:1920:force_original_aspect_ratio=increase` then `crop=1080:1920`
