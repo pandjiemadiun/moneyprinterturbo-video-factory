@@ -3631,6 +3631,7 @@ def _render_video_settings(panel, params):
                 (tr("Pexels"), "pexels"),
                 (tr("Pixabay"), "pixabay"),
                 (tr("Coverr"), "coverr"),
+                (tr("YouTube"), "youtube"),
                 (tr("WaveSpeed AI Video"), "wavespeed"),
                 (tr("Shengsuan Cloud AI Video"), "loomloom"),
                 (tr("Local file"), "local"),
@@ -3651,6 +3652,9 @@ def _render_video_settings(panel, params):
 
             if params.video_source == "wavespeed":
                 st.caption(tr("WaveSpeed AI Video Help"))
+
+            if params.video_source == "youtube":
+                st.caption(tr("YouTube Help"))
 
             if params.video_source == "local":
                 # Streamlit 的文件类型校验对扩展名大小写敏感，这里同时放行大小写两种形式。
@@ -5553,6 +5557,7 @@ def _render_generation_controls(
             "pexels",
             "pixabay",
             "coverr",
+            "youtube",
             "wavespeed",
             "loomloom",
             "local",

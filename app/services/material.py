@@ -1763,6 +1763,9 @@ def download_videos(
     elif source == "coverr":
         provider = "coverr"
         remote_search_videos = search_videos_coverr
+    elif source == "youtube":
+        provider = "youtube"
+        remote_search_videos = search_videos_youtube
 
     def search_videos(
         search_term: str,
@@ -1843,8 +1846,8 @@ def download_videos(
                 f"downloading {item.provider} video: "
                 f"asset_id={source_info.get('asset_id') or 'unknown'}"
             )
-            saved_video_path = save_video(
-                video_url=item.url, save_dir=material_directory
+            saved_video_path = _download_material_item(
+                item, provider, material_directory
             )
             if saved_video_path:
                 logger.info(f"video saved: {saved_video_path}")
