@@ -2340,21 +2340,13 @@ def _get_active_cache_references() -> set[str]:
     """Collect the set of cache_videos filenames currently referenced by
     active (processing) tasks.
 
-    Returns an empty set if task state cannot be reliably inspected
-    (fail-closed: empty set means 'no known references' but the caller
-    must still check age before deleting).
+    Raises ``RuntimeError`` if task state cannot be reliably inspected
+    (the caller must treat this as "ownership unknown" and preserve all
+    cache files for this sweep).
     """
     references: set[str] = set()
-    try:
-        # Page through all tasks.  Use a large page size to minimize round-trips.
-        tasks, total = sm.state.get_all_tasks(page=1, page_size=1000)
-    except Exception as e:
-        # If we cannot read task state at all (e.g. Redis unavailable, or
-        # in-memory state lost on restart), return empty.  The caller will
-        # keep all files because it cannot confirm they are unreferenced.
-        logger.debug(f"orphan sweeper: cannot read task state ({e}); "
-                     f"treating all files as potentially active")
-        return references
+    # Page through all tasks.  Use a large page size to minimize round-trips.
+    tasks, total = sm.state.get_all_tasks(page=1, page_size=1000)
 
     for task in tasks:
         state_val = task.get("state")
@@ -2388,6 +2380,11 @@ def cleanup_orphan_cache_videos(
     Production artifacts (``final-*``, ``combined-*``, ``audio.mp3``, etc.)
     and unknown files are never deleted.
 
+    FAIL-CLOSED: If task state cannot be read (e.g. Redis unavailable,
+    state backend error), the sweep is ABORTED and NO files are deleted.
+    This prevents deleting potentially-referenced cache files when
+    ownership cannot be verified.
+
     For each candidate:
       1. Verify it is a regular file.
       2. Verify filename matches an allowed pattern.
@@ -2398,6 +2395,7 @@ def cleanup_orphan_cache_videos(
       7. Unknown/unrecognized files: KEEP (fail-closed).
       8. Any inspection error: KEEP.
       9. Any deletion error: log warning, continue.
+      10. State unavailable: ABORT sweep (fail-closed).
 
     Returns the number of files deleted.
     """
@@ -2408,7 +2406,16 @@ def cleanup_orphan_cache_videos(
         return 0
 
     # Collect active references for the fail-closed KEEP rule.
-    active_refs = _get_active_cache_references()
+    # If task state cannot be read, abort the sweep entirely — we must not
+    # delete cache files when ownership/reference state cannot be verified.
+    try:
+        active_refs = _get_active_cache_references()
+    except Exception as e:
+        logger.warning(
+            f"orphan sweeper: cannot read task state ({e}); "
+            f"aborting sweep to preserve all cache files"
+        )
+        return 0
 
     ttl_seconds = ttl_days * 86400
     now = time.time()
