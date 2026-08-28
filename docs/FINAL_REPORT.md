@@ -20,6 +20,7 @@ when no footage is available — never substitutes random clips.
 | MPT scope tests (TDD + regression) | 151 passed | ✅ 151 passed, 55 subtests passed |
 | Factory tests | 203 passed, 2 skipped | ✅ 203 passed, 2 skipped |
 | Cross-genre QA (5 niches) | 5 PASS | ✅ 5/5 PASS |
+| Final-Gen-QA (4 uncurated niches, live Groq LLM) | 4 PASS | ✅ 4/4 PASS |
 | E2E video dimensions | 1080×1920 | ✅ 1080×1920 |
 | Black bars | 0 frames | ✅ 0/3 frames per job |
 | Stretch/distortion | none | ✅ verified via frame diversity + black bar checks |
@@ -30,6 +31,7 @@ when no footage is available — never substitutes random clips.
 | factory.db production safety | unchanged | ✅ byte-identical SHA256 |
 | Burned-in subtitles | yellow #FFFF00 | ✅ bottom-region content detected in all 5 |
 | No separate subtitle stream | burned-in only | ✅ streams=['video','audio'] in all 5 |
+| Groq LLM replaces Gemini | live topic+scene gen | ✅ 4/4 LIVE generation PASS |
 
 ---
 
@@ -59,11 +61,58 @@ when no footage is available — never substitutes random clips.
 
 ### QA Notes
 
-- 4 of 5 niches (fakta unik, misteri, sejarah, teknologi) are uncurated — topics and scenes were manually crafted following the Factory's `scene_planner.py` validation rules (camera-visible, no abstract/internal-process, no generic motivational)
+- 4 of 5 niches (fakta unik, misteri, sejarah, teknologi) are uncurated — in the Phase QA, topics and scenes were manually crafted following the Factory's `scene_planner.py` validation rules (camera-visible, no abstract/internal-process, no generic motivational)
 - 1 niche (semangat hidup) is curated — uses the Factory's `build_storyboard` directly
-- Gemini LLM (used by TopicPlanner for uncurated niches) was 429 rate-limited during QA; manual topics/scenes were used as a substitute for topic generation only — the MPT production rendering pipeline was exercised end-to-end for all 5
+- Gemini LLM (used by TopicPlanner for uncurated niches) was 429 rate-limited during Phase QA; manual topics/scenes were used as a substitute for topic generation only — the MPT production rendering pipeline was exercised end-to-end for all 5
+- In FINAL-GEN-QA, Groq (openai/gpt-oss-120b) successfully replaced Gemini as the LLM provider for live topic + scene generation
 
 ---
+
+## Final-Gen-QA: Live Topic + Scene Generation via Groq
+
+### Groq Readiness
+
+MPT's `config.toml` **already** has `llm_provider = "groq"` configured with `openai/gpt-oss-120b` as the model and the Groq API key set. The running Docker MPT server was started before this config change and still uses Gemini (429). However, the Factory can use Groq by invoking MPT's `llm.generate_script()` directly (MPT venv reads the current `config.toml`).
+
+**Groq connectivity**: ✅ PASS — HTTP 200-equivalent, valid Indonesian response, no rate limits.
+
+### Live Generation Results (4 uncurated niches)
+
+| Niche | Topic | 6 scenes | Scenes valid | Payload valid | Result |
+|-------|-------|----------|-------------|--------------|--------|
+| misteri | ✅ | ✅ | ✅ | ✅ | **PASS** |
+| fakta unik | ✅ | ✅ | ✅ | ✅ | **PASS** |
+| sejarah | ✅ | ✅ | ✅ | ✅ | **PASS** |
+| teknologi | ✅ | ✅ | ✅ | ✅ | **PASS** |
+
+**Topics generated live via Groq + Factory TopicPlanner:**
+- misteri: "Kasus hilangnya penumpang kereta api di Stasiun Tua"
+- fakta unik: "Kenapa gajeh tidak bisa melompat? Fakta unik yang mengejutkan"
+- sejarah: "Kerajaan Majapahit: Kejayaan, Kebudayaan, dan Runtuhnya"
+- teknologi: "Masa Depan Smartphone Lipat: Apa yang Bisa Diharapkan?"
+
+**All scenes** passed the Factory's `UniversalScenePlanner._validate()` — camera-visible English visual queries, no abstract/animation/diagram/generic-motivational patterns.
+
+### Provider Comparison (Gemini vs Groq)
+
+| Metric | Gemini | Groq (gpt-oss-120b) |
+|--------|--------|---------------------|
+| API status | 429 RESOURCE_EXHAUSTED | HTTP 200 equivalent |
+| Quota | 20 req/day free tier exhausted | No quota issues |
+| Topic generation | ❌ Blocked | ✅ 4/4 PASS |
+| Scene generation | ❌ Blocked | ✅ 4/4 PASS (exactly 6 scenes) |
+| Indonesian quality | N/A | ✅ Concrete, viewer-facing |
+
+### Production Safety (GROQ-FINAL-GEN-QA)
+
+| Check | Before | After | Delta |
+|-------|--------|-------|-------|
+| factory.db SHA256 | `ad0e6df9...59a1` | `ad0e6df9...59a1` | identical ✅ |
+| Production jobs | 171 | 171 | 0 ✅ |
+| MPT tasks | 130 | 130 | 0 ✅ |
+| MP4 files | 152 | 152 | 0 ✅ |
+| Source code modified | — | — | NO ✅ |
+| Rendered | — | — | NO ✅ |
 
 ### BAGIAN C — Smart 9:16 Video Reframing
 - **File**: `app/services/reframe.py` (new), `app/services/video.py` (modified)
