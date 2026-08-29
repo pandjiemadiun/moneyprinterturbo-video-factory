@@ -205,18 +205,39 @@ def retry_task(task_id: str) -> dict:
 
 
 def cancel_task(task_id: str) -> dict:
-    """Cancel a queued task."""
+    """Cancel a queued task.
+
+    Only QUEUED tasks are cancellable. PROCESSING tasks have no real worker
+    interruption, so we never present a fake cancellation for them. The task
+    manager's cancellation set is updated so the worker skips the task before
+    execution, and the state is marked CANCELLED for the UI.
+    """
     task = sm.state.get_task(task_id)
     if task is None:
         return {"success": False, "message": "task not found"}
 
-    # Only queued tasks can be cancelled
-    if task.get("state") == const.TASK_STATE_PROCESSING:
+    state = task.get("state")
+    if state == const.TASK_STATE_PROCESSING:
         return {"success": False, "message": "cannot cancel running task"}
-    if task.get("state") == const.TASK_STATE_COMPLETE:
+    if state == const.TASK_STATE_COMPLETE:
         return {"success": False, "message": "task already completed"}
+    if state == const.TASK_STATE_FAILED:
+        return {"success": False, "message": "task already failed"}
+    if state == const.TASK_STATE_CANCELLED:
+        return {"success": False, "message": "task already cancelled"}
 
-    # Mark as cancelled
+    # Real worker interruption: tell the task manager to skip this task if it
+    # is still enqueued (not yet executing). The worker checks _cancelled_ids
+    # in run_task / dequeue and will not execute a cancelled task.
+    try:
+        from app.controllers.v1.video import task_manager as api_task_manager
+
+        if api_task_manager is not None:
+            api_task_manager.cancel(task_id)
+    except Exception as exc:
+        logger.warning(f"task_manager.cancel failed for {task_id}: {exc}")
+
+    # Persist the CANCELLED terminal state so the UI and API agree.
     sm.state.update_task(task_id, state=const.TASK_STATE_CANCELLED)
     logger.info(f"cancelled task: {task_id}")
     return {"success": True, "message": "cancelled"}

@@ -99,6 +99,14 @@ def _public_task_data(task: dict) -> dict:
 
 
 def _task_file_to_uri(file: str, endpoint: str, task_dir: str, request_id: str) -> str:
+    """Convert a local task-artifact path to a URI.
+
+    When ``endpoint`` is configured (public reverse-proxy URL), the URI points
+    to the ``/stream/`` HTTP endpoint so the browser can play it with full
+    Range/206 support.  When no endpoint is configured the resolved local path
+    is returned unchanged so in-process clients (e.g. the Streamlit WebUI
+    sharing the same storage volume) can render it via ``st.video``.
+    """
     if not isinstance(file, str):
         return file
 
@@ -117,10 +125,11 @@ def _task_file_to_uri(file: str, endpoint: str, task_dir: str, request_id: str) 
         return file
 
     relative_path = os.path.relpath(resolved_path, task_dir).replace("\\", "/")
-    uri_path = f"tasks/{relative_path}"
     if endpoint:
-        return f"{endpoint.rstrip('/')}/{uri_path}"
-    return f"/{uri_path}"
+        return f"{endpoint.rstrip('/')}/stream/{relative_path}"
+    # No public endpoint configured: return the local path so in-process
+    # clients can read the file directly.
+    return resolved_path
 
 
 def _parse_byte_range(
@@ -269,12 +278,12 @@ def get_task(
         task_dir = utils.task_dir()
         response_task = _public_task_data(task)
 
-        if "videos" in task:
+        if "videos" in task and task["videos"]:
             response_task["videos"] = [
                 _task_file_to_uri(v, endpoint, task_dir, request_id)
                 for v in task["videos"]
             ]
-        if "combined_videos" in task:
+        if "combined_videos" in task and task["combined_videos"]:
             response_task["combined_videos"] = [
                 _task_file_to_uri(v, endpoint, task_dir, request_id)
                 for v in task["combined_videos"]
@@ -326,22 +335,39 @@ def delete_video(request: Request, task_id: str = Path(..., description="Task ID
     )
 
 
+# Allowed statuses for the ``/tasks/clear`` endpoint.  "cancelled" was
+# previously missing, preventing operators from cleaning up cancelled tasks.
+ALLOWED_CLEAR_STATUSES = ("completed", "failed", "queued", "cancelled", "orphan")
+
+
 @router.post("/tasks/clear", summary="Clear tasks by status")
 def clear_tasks(request: Request, status: str):
-    """Clear tasks by status: completed, failed, queued, orphan."""
+    """Clear tasks by status: completed, failed, queued, cancelled, orphan."""
     from app.services import task_cleanup
 
     request_id = base.get_task_id(request)
-    if status not in ("completed", "failed", "queued", "orphan"):
+    if status not in ALLOWED_CLEAR_STATUSES:
         raise HttpException(
             task_id=request_id, status_code=422, message="invalid status"
         )
     if status == "orphan":
-        count = task_cleanup.clear_orphan_tasks()
+        result = task_cleanup.clear_orphan_tasks()
     else:
-        count = task_cleanup.clear_tasks_by_status(status)
-    logger.info(f"cleared {count} tasks with status={status}, request_id={request_id}")
-    return utils.get_response(200, {"status": "cleared", "count": count, "target": status})
+        result = task_cleanup.clear_tasks_by_status(status)
+    logger.info(
+        f"cleared {result.get('count', 0)} tasks with status={status}, "
+        f"errors={result.get('errors', [])}, request_id={request_id}"
+    )
+    return utils.get_response(
+        200,
+        {
+            "status": "cleared",
+            "target": status,
+            "success": result.get("success", True),
+            "count": result.get("count", 0),
+            "errors": result.get("errors", []),
+        },
+    )
 
 
 @router.post("/tasks/clear-all", summary="Clear all tasks")
@@ -350,9 +376,20 @@ def clear_all_tasks(request: Request):
     from app.services import task_cleanup
 
     request_id = base.get_task_id(request)
-    count = task_cleanup.clear_all_tasks()
-    logger.success(f"cleared all {count} tasks, request_id={request_id}")
-    return utils.get_response(200, {"status": "cleared_all", "count": count})
+    result = task_cleanup.clear_all_tasks()
+    logger.success(
+        f"cleared all {result.get('count', 0)} tasks, "
+        f"errors={result.get('errors', [])}, request_id={request_id}"
+    )
+    return utils.get_response(
+        200,
+        {
+            "status": "cleared_all",
+            "success": result.get("success", True),
+            "count": result.get("count", 0),
+            "errors": result.get("errors", []),
+        },
+    )
 
 
 @router.get(

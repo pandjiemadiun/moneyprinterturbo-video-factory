@@ -1,10 +1,8 @@
 import ast
 import os
 import re
-import threading
 import time
 from collections.abc import Mapping
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -14,7 +12,7 @@ from loguru import logger
 
 from app.models import const
 from app.models.schema import VideoParams
-from app.services import webui_task
+from app.services import webui_api_client, webui_task
 from app.utils import logging_utils
 
 
@@ -34,8 +32,7 @@ def _attribute_name(node):
 
 
 def test_generation_controls_submit_background_task_instead_of_blocking_page():
-    """
-    WebUI 生成按钮不能重新直接调用同步流水线。
+    """WebUI 生成按钮不能重新直接调用同步流水线。
 
     这是 Issue #1120 白屏的核心回归保护：只要完整页面脚本再次阻塞在
     ``tm.start``，用户在生成期间刷新时仍可能收到指向旧渲染树的 delta。
@@ -58,12 +55,7 @@ def test_generation_controls_submit_background_task_instead_of_blocking_page():
 
 
 def test_webui_runtime_config_updates_do_not_use_blocking_writes():
-    """
-    生成期间的普通控件 rerun 不能重新等待长任务持有的配置锁。
-
-    所有 WebUI 配置写入都必须经过非阻塞 helper；LLM 连接测试和语音试听可
-    使用 try lock 快速返回，但页面代码不能直接调用阻塞锁或阻塞保存函数。
-    """
+    """生成期间的普通控件 rerun 不能重新等待长任务持有的配置锁。"""
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
     calls = {
         _attribute_name(node.func)
@@ -173,6 +165,10 @@ def test_completed_task_renders_subject_named_video_download(
             self.session_state = {}
             self.downloads = []
             self.videos = []
+            self.link_buttons = []
+            self.successes = []
+            self.warnings = []
+            self.errors = []
 
         def columns(self, count):
             return [FakeColumn() for _ in range(count)]
@@ -180,17 +176,17 @@ def test_completed_task_renders_subject_named_video_download(
         def video(self, video_path):
             self.videos.append(video_path)
 
-        def download_button(self, label, data, **kwargs):
-            self.downloads.append((label, data.read(), kwargs))
+        def link_button(self, label, url, **kwargs):
+            self.link_buttons.append((label, url, kwargs))
 
-        def success(self, _message):
-            pass
+        def success(self, message):
+            self.successes.append(message)
 
-        def warning(self, _message):
-            pass
+        def warning(self, message):
+            self.warnings.append(message)
 
-        def error(self, _message):
-            pass
+        def error(self, message):
+            self.errors.append(message)
 
     video_path = tmp_path / "final-1.mp4"
     video_path.write_bytes(b"video-content")
@@ -224,92 +220,56 @@ def test_completed_task_renders_subject_named_video_download(
     )
 
     assert fake_st.videos == [str(video_path)]
-    assert fake_st.downloads == [
-        (
-            "Download Video",
-            b"video-content",
-            {
-                "file_name": "A day in Shanghai.mp4",
-                "mime": "video/mp4",
-                "key": "download_generated_video_download-test_0",
-                "icon": ":material/download:",
-                "on_click": "ignore",
-                "use_container_width": True,
-            },
-        )
-    ]
+    assert len(fake_st.link_buttons) == 1
+    label, url, kwargs = fake_st.link_buttons[0]
+    assert label == "Download Video"
+    assert url == "/api/v1/download/download-test/final-1.mp4"
+    assert kwargs["key"] == "download_generated_video_download-test_0"
     assert open_task_folder.call_count == expected_open_count
     if expected_open_count:
         open_task_folder.assert_called_once_with("download-test")
 
 
-def test_submit_generation_returns_while_pipeline_is_still_running():
-    """后台流水线未结束时，提交函数必须已经返回，让 Streamlit 完成本次渲染。"""
+def test_submit_generation_returns_api_task_id_without_blocking():
+    """Submit must return the API task_id quickly without blocking on the
+    server-side pipeline. The API handles execution asynchronously."""
     task_id = "background-submit-test"
-    started = threading.Event()
-    release = threading.Event()
-    finished = threading.Event()
-
-    def blocking_start(**_kwargs):
-        started.set()
-        release.wait(timeout=5)
-        finished.set()
-        return {"videos": ["/tmp/final-1.mp4"]}
+    api_task_id = "api-generated-uuid-12345"
 
     params = VideoParams(video_subject="异步生成测试")
-    try:
-        with (
-            patch.object(webui_task.tm, "start", side_effect=blocking_start),
-            patch.object(
-                webui_task.config,
-                "runtime_config_lock",
-                return_value=nullcontext(),
-            ),
-        ):
-            started_at = time.monotonic()
-            webui_task.submit_generation(task_id, params, capture_logs=False)
-            elapsed = time.monotonic() - started_at
-
-            assert started.wait(timeout=2)
-            assert elapsed < 0.5
-            assert not finished.is_set()
-            task = webui_task.sm.state.get_task(task_id)
-            assert task["state"] == const.TASK_STATE_PROCESSING
-    finally:
-        release.set()
-        assert finished.wait(timeout=2)
-        webui_task.sm.state.delete_task(task_id)
-
-
-def test_submit_generation_copies_params_before_starting_worker():
-    """页面后续 rerun 或流水线内部修改参数时，不能反向污染当前表单对象。"""
-    params = VideoParams(video_subject="参数隔离测试")
-    with patch.object(webui_task._task_manager, "add_task") as add_task:
-        webui_task.submit_generation("copied-params-test", params, capture_logs=False)
-
-    submitted_params = add_task.call_args.kwargs["params"]
-    assert submitted_params == params
-    assert submitted_params is not params
-    webui_task.sm.state.delete_task("copied-params-test")
-
-
-def test_scheduling_failure_is_saved_as_terminal_task_state():
-    """队列或线程启动失败时不能让任务管理器永久停留在“生成中”。"""
-    task_id = "scheduling-failure-test"
-    params = VideoParams(video_subject="调度失败测试")
     with patch.object(
-        webui_task._task_manager,
-        "add_task",
-        side_effect=RuntimeError("worker unavailable"),
+        webui_api_client, "api_create_task", return_value={"task_id": api_task_id}
+    ) as mock_create:
+        started_at = time.monotonic()
+        returned_id = webui_task.submit_generation(
+            task_id, params, capture_logs=False
+        )
+        elapsed = time.monotonic() - started_at
+
+    assert mock_create.called
+    assert returned_id == api_task_id
+    assert elapsed < 1.0
+
+
+def test_submit_generation_propagates_api_errors():
+    """API failures during submission must raise so the UI can surface them."""
+    task_id = "error-propagation-test"
+    params = VideoParams(video_subject="错误传播测试")
+    with patch.object(
+        webui_api_client,
+        "api_create_task",
+        side_effect=ConnectionError("API unreachable"),
     ):
-        with pytest.raises(RuntimeError, match="worker unavailable"):
+        with pytest.raises(ConnectionError, match="API unreachable"):
             webui_task.submit_generation(task_id, params, capture_logs=False)
 
-    task = webui_task.sm.state.get_task(task_id)
-    assert task["state"] == const.TASK_STATE_FAILED
-    assert task["failed_stage"] == "scheduling"
-    assert task["error"] == "RuntimeError: worker unavailable"
-    webui_task.sm.state.delete_task(task_id)
+
+def test_submit_generation_does_not_use_legacy_tm_or_state():
+    """webui_task must not reference tm.start, _task_manager, or sm.state."""
+    src = (ROOT_DIR / "app" / "services" / "webui_task.py").read_text(encoding="utf-8")
+    assert "tm.start" not in src
+    assert "_task_manager" not in src
+    assert "sm.state" not in src
 
 
 def test_worker_logs_are_available_without_streamlit_session_state():
@@ -318,33 +278,14 @@ def test_worker_logs_are_available_without_streamlit_session_state():
     with webui_task._task_logs_lock:
         webui_task._task_logs.pop(task_id, None)
 
-    def logged_start(**_kwargs):
-        logger.info("unique background task log")
-        return {"videos": ["/tmp/final-1.mp4"]}
+    webui_task._append_task_log(task_id, "unique background task log")
 
-    with (
-        patch.object(webui_task.tm, "start", side_effect=logged_start),
-        patch.object(
-            webui_task.config,
-            "runtime_config_lock",
-            return_value=nullcontext(),
-        ),
-    ):
-        result = webui_task._run_generation(
-            task_id,
-            VideoParams(video_subject="日志测试"),
-            capture_logs=True,
-        )
-
-    assert result == {"videos": ["/tmp/final-1.mp4"]}
     records = webui_task.get_task_logs(task_id)
     assert len(records) == 1
-    assert re.fullmatch(
-        r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| INFO \| "
-        r'"\./test/services/test_webui_task\.py:\d+": logged_start '
-        r"- unique background task log",
-        records[0],
-    )
+    assert records[0].endswith("unique background task log")
+
+    with webui_task._task_logs_lock:
+        webui_task._task_logs.pop(task_id, None)
 
 
 def test_generation_log_fragment_refreshes_within_half_a_second():
@@ -368,13 +309,7 @@ def test_generation_log_fragment_refreshes_within_half_a_second():
 
 
 def test_generation_submit_skips_duplicate_config_save():
-    """
-    提交任务后不能在页面末尾再次等待配置锁。
-
-    后台任务会在完整生成期间持有 runtime_config_lock。生成分支已经请求过
-    非阻塞保存，页面末尾无需重复请求；普通交互则继续通过同一个非阻塞 helper
-    保存，不能重新退回 config.save_config。
-    """
+    """提交任务后不能在页面末尾再次等待配置锁。"""
     tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
     controls = next(
         node
@@ -443,26 +378,19 @@ def test_terminal_logger_reload_preserves_task_log_handler():
         logging_utils._terminal_handler_id = previous_handler_id
 
 
-def test_worker_wrapper_failure_is_saved_instead_of_leaving_processing_state():
-    """日志或配置包装层异常也必须转换成可查询的失败终态。"""
-    task_id = "worker-wrapper-failure-test"
-    with (
-        patch.object(webui_task.tm, "start", side_effect=RuntimeError("lock failed")),
-        patch.object(
-            webui_task.config,
-            "runtime_config_lock",
-            return_value=nullcontext(),
-        ),
+def test_submit_generation_returns_api_id_not_local_placeholder():
+    """submit_generation must return the API-generated task_id, not the
+    local placeholder uuid, so the UI polls the correct task."""
+    local_id = "local-placeholder-uuid"
+    api_id = "api-generated-uuid-abcdef"
+
+    params = VideoParams(video_subject="task_id flow test")
+    with patch.object(
+        webui_api_client, "api_create_task", return_value={"task_id": api_id}
     ):
-        result = webui_task._run_generation(
-            task_id,
-            VideoParams(video_subject="工作线程失败测试"),
-            capture_logs=False,
+        returned = webui_task.submit_generation(
+            task_id=local_id, params=params, capture_logs=False
         )
 
-    assert result["state"] == const.TASK_STATE_FAILED
-    assert result["failed_stage"] == "webui_worker"
-    task = webui_task.sm.state.get_task(task_id)
-    assert task["state"] == const.TASK_STATE_FAILED
-    assert task["error"] == "RuntimeError: lock failed"
-    webui_task.sm.state.delete_task(task_id)
+    assert returned == api_id
+    assert returned != local_id

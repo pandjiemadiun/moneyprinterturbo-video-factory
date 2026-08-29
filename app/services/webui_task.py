@@ -57,15 +57,19 @@ def submit_generation(
     capture_logs: bool = True,
     voice_preview: dict | None = None,
     loomloom_video_request: LoomLoomConfirmedVideoRequest | None = None,
-) -> None:
+) -> str:
     """Submit a video generation task via API.
 
     WebUI no longer owns task state. All operations go through the API.
+    Returns the API-generated task_id (which replaces the local placeholder
+    so subsequent UI polling queries the correct task).
     """
     task_params = params.model_copy(deep=True)
     try:
         result = webui_api_client.api_create_task(task_params.model_dump())
-        logger.info(f"task submitted via API: task_id={result.get('task_id', task_id)}")
+        api_task_id = result.get("task_id", task_id)
+        logger.info(f"task submitted via API: task_id={api_task_id}")
+        return api_task_id
     except Exception as exc:
         logger.error(f"submit_generation failed: {exc}")
         raise

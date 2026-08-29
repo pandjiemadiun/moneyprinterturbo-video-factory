@@ -6,7 +6,6 @@ import mimetypes
 import os
 import re
 import shutil
-import subprocess
 import sys
 import time
 import webbrowser
@@ -49,11 +48,11 @@ from app.services import (
     loomloom,
     video,
     voice,
+    webui_api_client,
     webui_task,
 )
 from app.services import elevenlabs_music as elevenlabs_music_service
 from app.services import sonilo as sonilo_service
-from app.services import state as sm
 from app.services import task as tm
 from app.services import version_checker
 from app.services import webui_batch
@@ -735,67 +734,26 @@ def _task_state_filter_key(task):
 
 
 def _scan_history_tasks(limit=30):
-    tasks_root = utils.task_dir()
-    if not os.path.isdir(tasks_root):
-        return []
-
-    # 任务管理 fragment 每两秒刷新一次。先只读取低成本的目录元数据并截取最近
-    # 的任务，再解析 script.json 和视频列表，避免历史任务很多时反复扫描全部内容。
-    task_entries = []
-    try:
-        with os.scandir(tasks_root) as entries:
-            for entry in entries:
-                try:
-                    if entry.name.startswith(".") or not entry.is_dir(
-                        follow_symlinks=False
-                    ):
-                        continue
-                    task_entries.append(
-                        (
-                            entry.stat(follow_symlinks=False).st_mtime,
-                            entry.name,
-                            entry.path,
-                        )
-                    )
-                except OSError as e:
-                    # 单个任务目录可能正在被删除，不应因此让整个任务面板失效。
-                    logger.debug(f"skip unavailable task directory: {entry.path}, {e}")
-    except OSError as e:
-        logger.warning(f"failed to scan task directory: {tasks_root}, {e}")
-        return []
-
-    task_entries.sort(key=lambda item: item[0], reverse=True)
-    tasks = []
-    for mtime, name, task_path in task_entries[:limit]:
-        script_data = _safe_load_task_script(task_path)
-        params_data = script_data.get("params", {}) if script_data else {}
-        video_file = _find_final_task_video(task_path)
-        subject = (
-            params_data.get("video_subject")
-            or script_data.get("script", "")[:40]
-            or name
-        )
-        tasks.append(
-            {
-                "task_id": name,
-                "subject": subject,
-                "state": const.TASK_STATE_COMPLETE if video_file else None,
-                "progress": 100 if video_file else 0,
-                "mtime": mtime,
-                "task_path": task_path,
-                "video_file": video_file,
-                "source": "history",
-            }
-        )
-
-    return tasks
+    # DEPRECATED: filesystem scan removed. Task state is authoritative via the
+    # API (SQLiteState on the API container). Filesystem-only task directories
+    # are treated as legacy/orphaned artifacts and reported separately. The
+    # orphan inventory is provided in the Phase 11H.1.14 final report.
+    return []
 
 
 def _collect_task_summaries(limit=20):
-    history_tasks = {task["task_id"]: task for task in _scan_history_tasks(limit=50)}
+    """Collect task summaries from the API — the canonical task-state source.
+
+    The WebUI is a pure API client. All task state (status, progress, output
+    paths, cross-post state) comes from ``webui_api_client.api_list_tasks``.
+    ``st.session_state["active_generation_tasks"]`` is allowed only as
+    transient UI presentation state for the short window between submission
+    and API-state visibility.
+    """
+    task_summaries: dict[str, dict] = {}
 
     try:
-        runtime_tasks, _ = sm.state.get_all_tasks(1, 50)
+        runtime_tasks, _ = webui_api_client.api_list_tasks(1, 50)
     except Exception as e:
         logger.warning(f"failed to load runtime tasks: {e}")
         runtime_tasks = []
@@ -806,58 +764,70 @@ def _collect_task_summaries(limit=20):
             continue
 
         task_path = os.path.join(utils.task_dir(), task_id)
-        history_task = history_tasks.get(task_id, {})
         video_files = task.get("videos") or []
-        video_file = (
-            video_files[0] if video_files else history_task.get("video_file", "")
-        )
+        video_file = video_files[0] if video_files else ""
+        params = task.get("params") or {}
         subject = (
             task.get("video_subject")
-            or history_task.get("subject")
+            or params.get("video_subject")
             or (task.get("script", "")[:40] if task.get("script") else "")
             or task_id
         )
 
-        history_tasks[task_id] = {
+        mtime = 0
+        if os.path.isdir(task_path):
+            try:
+                mtime = os.path.getmtime(task_path)
+            except OSError:
+                pass
+
+        task_summaries[task_id] = {
             "task_id": task_id,
             "subject": subject,
             "state": task.get("state"),
             "cross_post_state": task.get("cross_post_state"),
             "progress": int(task.get("progress", 0) or 0),
-            "mtime": os.path.getmtime(task_path)
-            if os.path.isdir(task_path)
-            else history_task.get("mtime", 0),
+            "mtime": mtime,
             "task_path": task_path,
             "video_file": video_file,
-            "source": "runtime",
+            "source": "api",
         }
 
+    # Merge active generation tasks (transient session state) for the short
+    # window between submission and API-state visibility. After the API
+    # confirms the task, the real terminal state takes precedence.
     for task_id, active_task in _active_generation_tasks().items():
-        history_task = history_tasks.get(task_id, {})
-        if history_task and _task_state_filter_key(history_task) in {
+        existing = task_summaries.get(task_id, {})
+        if existing and _task_state_filter_key(existing) in {
             "complete",
             "failed",
         }:
-            # 会话中的 active 标记只负责覆盖任务刚提交到状态存储前的极短窗口。
-            # 后台任务结束后必须以真实终态为准，不能把失败任务重新显示为生成中。
+            # Backend already recorded a terminal state; do not override.
             continue
 
         task_path = os.path.join(utils.task_dir(), task_id)
-        history_tasks[task_id] = {
+        mtime = 0
+        if os.path.isdir(task_path):
+            try:
+                mtime = os.path.getmtime(task_path)
+            except OSError:
+                pass
+
+        task_summaries[task_id] = {
             "task_id": task_id,
             "subject": active_task.get("subject")
-            or history_task.get("subject")
-            or task_id,
+            or existing.get("subject", task_id),
             "state": const.TASK_STATE_PROCESSING,
-            "progress": history_task.get("progress", 0),
+            "cross_post_state": existing.get("cross_post_state"),
+            "progress": existing.get("progress", 0),
             "mtime": active_task.get("mtime")
-            or history_task.get("mtime", datetime.now().timestamp()),
+            or existing.get("mtime", datetime.now().timestamp()),
             "task_path": task_path,
-            "video_file": history_task.get("video_file", ""),
+            "video_file": existing.get("video_file", ""),
             "source": "active",
         }
 
-    tasks = list(history_tasks.values())
+    tasks = list(task_summaries.values())
     return sorted(tasks, key=lambda item: item["mtime"], reverse=True)[:limit]
 
 
@@ -872,67 +842,55 @@ def _open_task_path(task_path):
 
 
 def _open_task_video(video_file):
+    """Return an in-browser playable media reference.
+
+    Previously this function launched a server-side media player which
+    violated the in-browser playback requirement. The video is now
+    rendered inside the browser via ``st.video`` (Streamlit's supported
+    in-browser rendering) or a proper HTTP streaming URL. This helper
+    only validates the path safety of local files; actual playback is
+    delegated to ``st.video`` in the caller.
+    """
+    if not video_file:
+        return None
+
     tasks_root = os.path.abspath(utils.task_dir())
     normalized_file = os.path.abspath(video_file)
-
-    # 视频路径来自任务目录扫描或运行期状态。这里仍然限制只能打开任务目录
-    # 内的文件，避免 UI 操作被异常路径扩展成任意本地文件打开能力。
     if not normalized_file.startswith(tasks_root + os.sep):
         logger.warning(f"invalid task video path: {normalized_file}")
-        return
+        return None
     if not os.path.isfile(normalized_file):
         logger.warning(f"task video does not exist: {normalized_file}")
-        return
+        return None
 
-    try:
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", normalized_file])
-        elif sys.platform.startswith("win"):
-            os.startfile(normalized_file)  # type: ignore[attr-defined]
-        else:
-            subprocess.Popen(["xdg-open", normalized_file])
-    except Exception as e:
-        logger.error(f"failed to open task video: {normalized_file}, {e}")
+    return normalized_file
 
 
 def _delete_task(task_id, task_path, task_state=None):
-    # 页面展示的状态可能落后于后台任务。删除前同时检查传入状态、当前会话的
-    # 活跃任务和最新状态，避免任务刚开始或已产出中间视频时被误删。
-    current_task = None
-    try:
-        current_task = sm.state.get_task(task_id)
-    except Exception as e:
-        logger.exception(f"failed to verify task state before deletion: {task_id}, {e}")
-        return False
+    """Delete a task via the canonical API.
 
-    task_snapshot = dict(current_task or {})
-    task_snapshot.setdefault("state", task_state)
-    if task_id in _active_generation_tasks():
-        task_snapshot["state"] = const.TASK_STATE_PROCESSING
-
-    if tm.is_task_busy(task_snapshot):
-        logger.warning(f"refused to delete running task: {task_id}")
-        return False
-
+    The API handles both canonical state deletion (SQLiteState) and artifact
+    deletion (filesystem rmtree).  The WebUI must not bypass the API to
+    independently delete state or artifacts.
+    """
     tasks_root = os.path.abspath(utils.task_dir())
     normalized_path = os.path.abspath(task_path)
-
-    # 删除任务会移除任务状态和本地生成文件。这里必须限定在 storage/tasks
-    # 下，避免异常 task_path 造成误删其它本地目录。
     if not normalized_path.startswith(tasks_root + os.sep):
         logger.warning(f"invalid task folder path for deletion: {normalized_path}")
         return False
 
     try:
-        if hasattr(sm.state, "delete_task"):
-            sm.state.delete_task(task_id)
-        if os.path.isdir(normalized_path):
-            shutil.rmtree(normalized_path)
-        logger.info(f"deleted task: {task_id}")
-        return True
+        result = webui_api_client.api_delete_task(task_id)
     except Exception as e:
-        logger.exception(f"failed to delete task: {task_id}, {e}")
+        logger.exception(f"failed to call API delete for task: {task_id}, {e}")
         return False
+
+    if not result.get("success", False):
+        logger.warning(f"API delete failed for task {task_id}: {result}")
+        return False
+
+    logger.info(f"deleted task via API: {task_id}")
+    return True
 
 
 def _count_processing_tasks(tasks):
@@ -1012,15 +970,24 @@ def _render_task_table(filtered_tasks, key_prefix):
                 )
                 with action_cols[0]:
                     play_label = tr("Play")
-                    if st.button(
-                        play_label,
-                        key=f"play_task_{key_prefix}_{task_id}",
-                        use_container_width=True,
-                        icon=":material/play_arrow:",
-                        help=play_label,
-                        disabled=not has_video,
-                    ):
-                        _open_task_video(task["video_file"])
+                    if has_video:
+                        with st.popover(
+                            play_label,
+                            key=f"play_task_{key_prefix}_{task_id}",
+                            icon=":material/play_arrow:",
+                            help=play_label,
+                            use_container_width=True,
+                        ):
+                            st.video(task["video_file"])
+                    else:
+                        st.button(
+                            play_label,
+                            key=f"play_task_{key_prefix}_{task_id}",
+                            use_container_width=True,
+                            icon=":material/play_arrow:",
+                            help=play_label,
+                            disabled=True,
+                        )
 
                 with action_cols[1]:
                     open_label = tr("Open Task Folder")
@@ -1773,17 +1740,16 @@ def _render_generation_task_snapshot(task_id, task):
                     i + 1,
                     len(video_files),
                 )
-                with open(url, "rb") as video_file:
-                    st.download_button(
-                        download_label,
-                        data=video_file,
-                        file_name=download_name,
-                        mime=mimetypes.guess_type(url)[0] or "video/mp4",
-                        key=f"download_generated_video_{task_id}_{i}",
-                        icon=":material/download:",
-                        on_click="ignore",
-                        use_container_width=True,
-                    )
+                filename = os.path.basename(url)
+                download_url = f"/api/v1/download/{task_id}/{filename}"
+                st.link_button(
+                    download_label,
+                    url=download_url,
+                    key=f"download_generated_video_{task_id}_{i}",
+                    icon=":material/download:",
+                    use_container_width=True,
+                    help=download_label,
+                )
     except Exception as exc:
         logger.exception(
             f"failed to render generated video preview: task_id={task_id}, "
@@ -1804,7 +1770,7 @@ def _render_generation_task_snapshot(task_id, task):
 def _render_running_generation_task(task_id):
     """只在任务运行期间轮询；结束后切回静态结果，停止不必要的定时刷新。"""
     try:
-        task = sm.state.get_task(task_id)
+        task = webui_api_client.api_get_task(task_id)
     except Exception as exc:
         logger.exception(
             f"failed to query WebUI generation task: task_id={task_id}, error={exc}"
@@ -1829,7 +1795,7 @@ def _render_current_generation_task():
         return
 
     try:
-        task = sm.state.get_task(task_id)
+        task = webui_api_client.api_get_task(task_id)
     except Exception as exc:
         logger.exception(
             f"failed to query current WebUI task: task_id={task_id}, error={exc}"
@@ -5958,7 +5924,7 @@ def _render_generation_controls(
             st.toast(tr("Generating Video"))
             logger.info(tr("Start Generating Video"))
             logger.info(utils.to_json(params))
-            webui_task.submit_generation(
+            api_task_id = webui_task.submit_generation(
                 task_id=task_id,
                 params=params,
                 capture_logs=not config.ui.get("hide_log", False),
@@ -5977,8 +5943,17 @@ def _render_generation_controls(
             st.error(tr("Video Generation Failed"))
             st.stop()
 
-        st.session_state["current_generation_task_id"] = task_id
-        logger.info(f"WebUI generation task submitted: task_id={task_id}")
+        # The API generated its own task_id; switch tracking from the local
+        # placeholder to the canonical server-side id so subsequent API polls
+        # query the correct task.
+        if api_task_id and api_task_id != task_id:
+            active = st.session_state.get("active_generation_tasks", {})
+            prev = active.pop(str(task_id), {})
+            active[str(api_task_id)] = prev
+
+        del st.session_state["pending_generation_task_id"]
+        st.session_state["current_generation_task_id"] = api_task_id
+        logger.info(f"WebUI generation task submitted: task_id={api_task_id}")
 
     _render_current_generation_task()
     return start_button
@@ -6105,13 +6080,14 @@ def _render_video_card(task):
                 from datetime import datetime
                 st.caption(datetime.fromtimestamp(task["mtime"]).strftime("%Y-%m-%d %H:%M"))
             if video_file and os.path.isfile(video_file):
-                with open(video_file, "rb") as f:
-                    st.download_button(
-                        tr("Download Video"),
-                        data=f,
-                        file_name=_build_video_download_name(task.get("subject"), 1, 1),
-                        key=f"vid_dl_{task_id}",
-                    )
+                filename = os.path.basename(video_file)
+                download_url = f"/api/v1/download/{task_id}/{filename}"
+                st.link_button(
+                    tr("Download Video"),
+                    url=download_url,
+                    key=f"vid_dl_{task_id}",
+                    help=tr("Download Video"),
+                )
 
 
 def _find_task_thumbnail(task):
@@ -6162,9 +6138,10 @@ def _render_jobs_view():
     processing = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_PROCESSING)
     completed = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_COMPLETE)
     failed = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_FAILED)
+    cancelled = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_CANCELLED)
 
     # 状态摘要
-    summary_cols = st.columns(4)
+    summary_cols = st.columns(5)
     with summary_cols[0]:
         st.metric(tr("Jobs Metric Queued"), queued)
     with summary_cols[1]:
@@ -6173,32 +6150,39 @@ def _render_jobs_view():
         st.metric(tr("Jobs Metric Completed"), completed)
     with summary_cols[3]:
         st.metric(tr("Jobs Metric Failed"), failed)
+    with summary_cols[4]:
+        st.metric(tr("Jobs Metric Cancelled"), cancelled)
 
     st.divider()
 
     # 清理操作
     with st.expander(tr("Jobs Cleanup Title"), expanded=False):
         st.write(tr("Jobs Cleanup Desc"))
-        cleanup_cols = st.columns(4)
+        cleanup_cols = st.columns(5)
         with cleanup_cols[0]:
             if st.button(tr("Jobs Clear Completed"), key="btn_clear_completed"):
-                count = _api_clear_tasks("completed")
-                st.success(tr("Jobs Cleared").format(count=count))
+                result = _api_clear_tasks("completed")
+                _report_clear_result("completed", result)
                 st.rerun()
         with cleanup_cols[1]:
             if st.button(tr("Jobs Clear Failed"), key="btn_clear_failed"):
-                count = _api_clear_tasks("failed")
-                st.success(tr("Jobs Cleared").format(count=count))
+                result = _api_clear_tasks("failed")
+                _report_clear_result("failed", result)
                 st.rerun()
         with cleanup_cols[2]:
-            if st.button(tr("Jobs Clear Orphan"), key="btn_clear_orphan"):
-                count = _api_clear_tasks("orphan")
-                st.success(tr("Jobs Cleared").format(count=count))
+            if st.button(tr("Jobs Clear Cancelled"), key="btn_clear_cancelled"):
+                result = _api_clear_tasks("cancelled")
+                _report_clear_result("cancelled", result)
                 st.rerun()
         with cleanup_cols[3]:
+            if st.button(tr("Jobs Clear Orphan"), key="btn_clear_orphan"):
+                result = _api_clear_tasks("orphan")
+                _report_clear_result("orphan", result)
+                st.rerun()
+        with cleanup_cols[4]:
             if st.button(tr("Jobs Clear All"), key="btn_clear_all", type="primary"):
-                count = _api_clear_all_tasks()
-                st.success(tr("Jobs Cleared").format(count=count))
+                result = _api_clear_all_tasks()
+                _report_clear_result("all", result)
                 st.rerun()
 
     st.divider()
@@ -6208,34 +6192,88 @@ def _render_jobs_view():
         _render_job_card(task)
 
 
-def _api_clear_tasks(status: str) -> int:
-    """调用后端API清理指定状态的任务。"""
-    import requests
-    try:
-        resp = requests.post(
-            f"http://127.0.0.1:8080/api/v1/tasks/clear?status={status}",
-            timeout=30,
-        )
-        if resp.status_code == 200:
-            return resp.json().get("data", {}).get("count", 0)
-    except Exception as e:
-        logger.warning(f"clear tasks failed: {e}")
-    return 0
+def _api_clear_tasks(status: str) -> dict:
+    """Clear tasks by status via the canonical API.
+
+    Returns ``{"success": bool, "count": int, "errors": list, "message": str}``.
+    """
+    result = webui_api_client.api_clear_tasks(status)
+    # Normalise the shape returned by the API client.
+    if "count" not in result:
+        result["count"] = result.get("count", 0)
+    if "errors" not in result:
+        result["errors"] = []
+    if "message" not in result:
+        result["message"] = ""
+    return result
 
 
-def _api_clear_all_tasks() -> int:
-    """调用后端API清理所有任务。"""
-    import requests
-    try:
-        resp = requests.post(
-            "http://127.0.0.1:8080/api/v1/tasks/clear-all",
-            timeout=30,
+def _api_clear_all_tasks() -> dict:
+    """Clear all tasks via the canonical API.
+
+    Returns ``{"success": bool, "count": int, "errors": list, "message": str}``.
+    """
+    result = webui_api_client.api_clear_all_tasks()
+    if "count" not in result:
+        result["count"] = result.get("count", 0)
+    if "errors" not in result:
+        result["errors"] = []
+    if "message" not in result:
+        result["message"] = ""
+    return result
+
+
+def _report_clear_result(target: str, result: dict):
+    """Display the outcome of a clear operation to the user.
+
+    Shows success with the count affected, surfaces every per-task error,
+    and never reports success merely because the button was clicked.
+    """
+    success = result.get("success", False)
+    count = result.get("count", 0)
+    errors = result.get("errors", [])
+    message = result.get("message", "")
+
+    if success:
+        st.success(
+            f"✅ Cleared **{target}**: {count} task(s) removed."
         )
-        if resp.status_code == 200:
-            return resp.json().get("data", {}).get("count", 0)
-    except Exception as e:
-        logger.warning(f"clear all tasks failed: {e}")
-    return 0
+    else:
+        st.error(
+            f"❌ Clear **{target}** failed: {message or 'unknown error'}"
+        )
+
+    if errors:
+        for err in errors:
+            st.warning(str(err))
+
+
+def _do_job_action(task_id, action):
+    """Execute a job-level action (cancel/retry/delete) via the API.
+
+    Surfaces an explicit success or error message.  Never reports success
+    merely because the button was clicked.
+    """
+    if action == "cancel":
+        result = webui_api_client.api_cancel_task(task_id)
+        success = result.get("status") == "cancelled" or result.get("success", False)
+        label = "Cancelled"
+    elif action == "retry":
+        result = webui_api_client.api_retry_task(task_id)
+        success = result.get("status") == "retried" or result.get("success", False)
+        label = "Retried"
+    elif action == "delete":
+        result = webui_api_client.api_delete_task(task_id)
+        success = result.get("success", False)
+        label = "Deleted"
+    else:
+        return
+
+    if success:
+        st.success(f"✅ {label} task: {task_id}")
+    else:
+        msg = result.get("message", str(result))
+        st.error(f"❌ {label} failed: {msg}")
 
 
 def _render_job_card(task):
@@ -6251,6 +6289,9 @@ def _render_job_card(task):
     elif state == const.TASK_STATE_PROCESSING:
         status_class = "status-processing"
         status_label = tr("Job Status Processing")
+    elif state == const.TASK_STATE_CANCELLED:
+        status_class = "status-cancelled"
+        status_label = tr("Job Status Cancelled")
     elif state == const.TASK_STATE_FAILED:
         status_class = "status-failed"
         status_label = tr("Job Status Failed")
@@ -6276,20 +6317,53 @@ def _render_job_card(task):
             else:
                 st.caption(f"{progress}%")
         with cols[3]:
-            if state == const.TASK_STATE_COMPLETE:
-                video_file = task.get("video_file", "")
-                if video_file and os.path.isfile(video_file):
-                    with open(video_file, "rb") as f:
-                        st.download_button(
-                            "▶",
-                            data=f,
-                            file_name=f"video_{task_id}.mp4",
-                            key=f"job_play_{task_id}",
-                        )
+            video_file = task.get("video_file", "")
+            has_video = bool(video_file) and os.path.isfile(video_file)
+
+            if state == const.TASK_STATE_QUEUED:
+                if st.button("✕", key=f"job_cancel_{task_id}", help=tr("Cancel Task"), type="primary"):
+                    _do_job_action(task_id, "cancel")
+                    st.rerun()
+            elif state == const.TASK_STATE_PROCESSING:
+                # No fake cancellation — real worker interruption
+                # doesn't exist for processing tasks.
+                st.caption(tr("Job Status Processing"))
             elif state == const.TASK_STATE_FAILED:
-                error = task.get("error", "")
-                if error:
-                    st.caption(error[:50] + "..." if len(error) > 50 else error)
+                if st.button("↻", key=f"job_retry_{task_id}", help=tr("Retry Task")):
+                    _do_job_action(task_id, "retry")
+                    st.rerun()
+                if st.button("✕", key=f"job_delete_{task_id}", help=tr("Delete Task"), type="primary"):
+                    _do_job_action(task_id, "delete")
+                    st.rerun()
+            elif state == const.TASK_STATE_CANCELLED:
+                if st.button("↻", key=f"job_retry_{task_id}", help=tr("Retry Task")):
+                    _do_job_action(task_id, "retry")
+                    st.rerun()
+                if st.button("✕", key=f"job_delete_{task_id}", help=tr("Delete Task"), type="primary"):
+                    _do_job_action(task_id, "delete")
+                    st.rerun()
+            elif state == const.TASK_STATE_COMPLETE:
+                acols = st.columns(4)
+                with acols[0]:
+                    if has_video:
+                        with st.popover("▶", key=f"job_play_{task_id}", help=tr("Play Task")):
+                            st.video(video_file)
+                    else:
+                        st.empty()
+                with acols[1]:
+                    if has_video:
+                        filename = os.path.basename(video_file)
+                        st.link_button("↓", url=f"/api/v1/download/{task_id}/{filename}", key=f"job_download_{task_id}", help=tr("Download Task"))
+                    else:
+                        st.empty()
+                with acols[2]:
+                    if st.button("✕", key=f"job_delete_{task_id}", help=tr("Delete Task"), type="primary"):
+                        _do_job_action(task_id, "delete")
+                        st.rerun()
+                with acols[3]:
+                    st.empty()
+            else:
+                st.empty()
 
         if task.get("failed_stage"):
             st.caption(tr("Job Failed Stage").format(stage=task["failed_stage"]))

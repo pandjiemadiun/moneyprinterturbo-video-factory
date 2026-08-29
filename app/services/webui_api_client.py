@@ -83,6 +83,8 @@ def api_delete_task(task_id: str) -> dict:
             f"{base_url}/api/v1/tasks/{task_id}",
             timeout=30,
         )
+        if resp.status_code == 404:
+            return {"success": False, "message": "task not found"}
         resp.raise_for_status()
         return resp.json().get("data", {"success": True})
     except Exception as exc:
