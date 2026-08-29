@@ -225,6 +225,7 @@
     "Videos Count": "{count} 个视频",
     "Video Source Label": "来源: {source}",
     "Jobs Title": "生产任务",
+    "Jobs View Info": "使用顶栏中的任务管理器监控生产任务。",
     "Pixabay": "Pixabay",
     "Please Select a Valid Video Source": "请选择支持的视频来源",
     "Local file": "本地文件",

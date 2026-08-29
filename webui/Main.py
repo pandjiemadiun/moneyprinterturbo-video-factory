@@ -6099,7 +6099,7 @@ def _render_video_card(task):
 def _render_jobs_view():
     """渲染任务管理视图，展示所有任务的状态和进度。"""
     st.write(tr("Jobs Title"))
-    _render_task_manager_panel()
+    st.info(tr("Jobs View Info"))
 
 
 _render_application()
