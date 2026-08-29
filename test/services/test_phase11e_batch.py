@@ -36,13 +36,14 @@ class TestBatchService(unittest.TestCase):
 
         with patch("app.services.webui_batch.webui_task") as mock_wt:
             mock_wt.submit_generation = MagicMock()
-            batch_id = submit_batch(topics, common_params)
+            batch_id, task_ids = submit_batch(topics, common_params)
 
         self.assertIsNotNone(batch_id)
+        self.assertEqual(len(task_ids), 3)
         self.assertEqual(mock_wt.submit_generation.call_count, 3)
 
     def test_submit_batch_returns_task_ids(self):
-        """submit_batch should return the batch ID for tracking."""
+        """submit_batch should return the batch ID and task IDs for tracking."""
         from app.services.webui_batch import submit_batch
 
         topics = [{"subject": "Test", "video_count": 1}]
@@ -50,10 +51,11 @@ class TestBatchService(unittest.TestCase):
 
         with patch("app.services.webui_batch.webui_task") as mock_wt:
             mock_wt.submit_generation = MagicMock()
-            batch_id = submit_batch(topics, common_params)
+            batch_id, task_ids = submit_batch(topics, common_params)
 
         self.assertIsNotNone(batch_id)
-        self.assertTrue(len(batch_id) > 0)
+        self.assertTrue(len(task_ids) > 0)
+        self.assertEqual(len(task_ids), 1)
 
     def test_submit_batch_with_youtube_source(self):
         """Batch should support YouTube as a source."""
@@ -64,7 +66,7 @@ class TestBatchService(unittest.TestCase):
 
         with patch("app.services.webui_batch.webui_task") as mock_wt:
             mock_wt.submit_generation = MagicMock()
-            batch_id = submit_batch(topics, common_params)
+            batch_id, task_ids = submit_batch(topics, common_params)
 
         self.assertIsNotNone(batch_id)
         call_args = mock_wt.submit_generation.call_args

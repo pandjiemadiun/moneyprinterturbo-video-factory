@@ -36,7 +36,8 @@ def submit_batch(
             - And other VideoParams fields
 
     Returns:
-        batch_id: UUID string identifying this batch.
+        Tuple of (batch_id, task_ids) where batch_id is the UUID string
+        identifying this batch and task_ids is the list of task UUIDs created.
 
     Raises:
         ValueError: If topics list is empty.
@@ -71,7 +72,7 @@ def submit_batch(
     logger.success(
         f"batch {batch_id}: submitted {len(task_ids)} tasks"
     )
-    return batch_id
+    return batch_id, task_ids
 
 
 def get_batch_status(task_ids: list[str]) -> dict:

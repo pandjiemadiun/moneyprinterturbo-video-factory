@@ -56,6 +56,7 @@ from app.services import sonilo as sonilo_service
 from app.services import state as sm
 from app.services import task as tm
 from app.services import version_checker
+from app.services import webui_batch
 from app.utils.logging_utils import configure_terminal_logger
 from app.utils import utils
 
@@ -1096,6 +1097,40 @@ def _render_task_manager_panel(tasks=None):
             ]
             _render_task_table(filtered_tasks, status_key)
 
+    _render_batch_monitor_panel()
+
+
+def _render_batch_monitor_panel():
+    """Render batch monitor for current batch if one exists."""
+    batch_id = st.session_state.get("current_batch_id")
+    if not batch_id:
+        return
+
+    batch_topics = st.session_state.get("batch_topics", [])
+    if not batch_topics:
+        return
+
+    task_ids = []
+    for i, topic in enumerate(batch_topics):
+        task_id_key = f"batch_task_id_{i}"
+        if task_id_key in st.session_state:
+            task_ids.append(st.session_state[task_id_key])
+
+    if not task_ids:
+        return
+
+    status = webui_batch.get_batch_status(task_ids)
+
+    with st.container(border=True):
+        st.write(tr("Batch Monitor Title"))
+        st.progress(
+            status["progress"] / 100.0,
+            text=f"{status['complete']}/{status['total']} {tr('Batch Complete')} | "
+                 f"{status['failed']} {tr('Batch Failed')} | "
+                 f"{status['processing']} {tr('Batch Processing')} | "
+                 f"{status['queued']} {tr('Batch Queued')}",
+        )
+
 
 @st.fragment(run_every="2s")
 def _render_task_manager_entry():
@@ -1711,6 +1746,12 @@ def _render_generation_task_snapshot(task_id, task):
         player_cols = st.columns(len(video_files) * 2 + 1)
         for i, url in enumerate(video_files):
             with player_cols[i * 2 + 1]:
+                thumbnails = task.get("thumbnails") or []
+                if i < len(thumbnails) and thumbnails[i]:
+                    try:
+                        st.image(thumbnails[i], use_container_width=True)
+                    except Exception:
+                        pass
                 st.video(url)
                 if not os.path.isfile(url):
                     logger.warning(
@@ -3648,6 +3689,89 @@ def _render_script_settings(panel, params):
             )
 
 
+def _render_batch_mode_toggle(params):
+    """Render batch mode toggle and batch creation UI."""
+    if not st.checkbox(tr("Batch Mode"), key="batch_mode_toggle"):
+        return False
+
+    with st.container(border=True):
+        st.write(tr("Batch Mode Title"))
+        st.caption(tr("Batch Mode Help"))
+
+        batch_topics = st.session_state.get("batch_topics", [])
+        if not batch_topics:
+            batch_topics = [{"subject": "", "video_count": 1, "video_source": params.video_source}]
+
+        topics = []
+        for i in range(st.number_input(tr("Batch Topic Count"), min_value=1, max_value=20, value=len(batch_topics), key="batch_topic_count")):
+            if i >= len(batch_topics):
+                batch_topics.append({"subject": "", "video_count": 1, "video_source": params.video_source})
+            with st.container(border=True):
+                st.write(f"**{tr('Batch Topic')} {i + 1}**")
+                batch_topics[i]["subject"] = st.text_input(
+                    tr("Batch Topic Subject"),
+                    value=batch_topics[i].get("subject", ""),
+                    key=f"batch_topic_subject_{i}",
+                )
+                batch_topics[i]["video_count"] = st.number_input(
+                    tr("Batch Topic Count"),
+                    min_value=1,
+                    max_value=5,
+                    value=batch_topics[i].get("video_count", 1),
+                    key=f"batch_topic_count_{i}",
+                )
+                batch_topics[i]["video_source"] = st.selectbox(
+                    tr("Batch Topic Source"),
+                    options=["pexels", "pixabay", "coverr", "youtube", "wavespeed", "loomloom"],
+                    index=["pexels", "pixabay", "coverr", "youtube", "wavespeed", "loomloom"].index(
+                        batch_topics[i].get("video_source", "pexels")
+                    ),
+                    format_func=lambda v: dict((value, label) for label, value in [
+                        (tr("Pexels"), "pexels"),
+                        (tr("Pixabay"), "pixabay"),
+                        (tr("Coverr"), "coverr"),
+                        (tr("YouTube"), "youtube"),
+                        (tr("WaveSpeed AI Video"), "wavespeed"),
+                        (tr("Shengsuan Cloud AI Video"), "loomloom"),
+                    ])[v],
+                    key=f"batch_topic_source_{i}",
+                )
+                if batch_topics[i]["video_source"] == "youtube":
+                    batch_topics[i]["video_terms"] = st.text_input(
+                        tr("Batch YouTube Terms"),
+                        value=batch_topics[i].get("video_terms", ""),
+                        key=f"batch_topic_terms_{i}",
+                    )
+                topics.append(batch_topics[i])
+
+        st.session_state["batch_topics"] = batch_topics
+
+        common_params = {
+            "video_source": params.video_source,
+            "voice_name": params.voice_name,
+            "subtitle_enabled": params.subtitle_enabled,
+            "video_aspect": params.video_aspect,
+        }
+
+        if st.button(tr("Create Batch"), key="create_batch_button", type="primary"):
+            valid_topics = [t for t in topics if t["subject"].strip()]
+            if not valid_topics:
+                st.error(tr("Batch Empty Topics Error"))
+                return False
+            try:
+                batch_id, task_ids = webui_batch.submit_batch(valid_topics, common_params)
+                st.session_state["current_batch_id"] = batch_id
+                for i, task_id in enumerate(task_ids):
+                    st.session_state[f"batch_task_id_{i}"] = task_id
+                st.success(tr("Batch Created Success").format(count=len(valid_topics)))
+                st.rerun()
+            except Exception as exc:
+                st.error(tr("Batch Create Failed").format(error=str(exc)))
+                return False
+
+    return True
+
+
 def _render_video_settings(panel, params):
     """渲染视频设置并返回本次选择的本地素材。"""
     uploaded_files = []
@@ -3686,6 +3810,9 @@ def _render_video_settings(panel, params):
 
             if params.video_source == "youtube":
                 st.caption(tr("YouTube Help"))
+
+            # Batch Mode toggle
+            _render_batch_mode_toggle(params)
 
             if params.video_source == "local":
                 # Streamlit 的文件类型校验对扩展名大小写敏感，这里同时放行大小写两种形式。
