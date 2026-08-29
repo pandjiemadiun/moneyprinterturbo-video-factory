@@ -58,23 +58,31 @@ class TestNavigationSingleCanonicalState:
     SEPARATE widget key "nav_view_selector", whose stale value overwrote
     the CTA's navigation on rerun.
 
-    Fix: the segmented_control uses key="nav_view" (the same canonical key
-    the CTA writes to), and all entry points go through _switch_nav_view().
+    Fix: the segmented_control must NOT use key="nav_view" because
+    _switch_nav_view() mutates st.session_state["nav_view"] after widget
+    creation, which raises StreamlitAPIException. The widget either has
+    no key or uses a separate key; application state is managed solely
+    by _switch_nav_view().
     """
 
     def test_no_nav_view_selector_key_in_main(self):
         """The widget must NOT use a separate key that can shadow nav_view."""
         assert "nav_view_selector" not in _read_source()
 
-    def test_segmented_control_uses_nav_view_key(self):
-        """The segmented_control key must be "nav_view" (canonical)."""
+    def test_segmented_control_does_not_use_nav_view_key(self):
+        """The segmented_control must NOT use key='nav_view' because that
+        would bind the widget to the app state key and trigger
+        StreamlitAPIException when _switch_nav_view mutates it after
+        widget creation."""
         tree = _parse()
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 if node.func.attr == "segmented_control":
                     for kw in node.keywords:
                         if kw.arg == "key" and isinstance(kw.value, ast.Constant):
-                            assert kw.value.value == "nav_view"
+                            assert kw.value.value != "nav_view", (
+                                "segmented_control key must NOT be 'nav_view'"
+                            )
 
     def test_switch_nav_view_helper_exists(self):
         """A canonical _switch_nav_view helper must exist."""
@@ -117,25 +125,28 @@ class TestNavigationSingleCanonicalState:
 
 
 class TestNavigationStateChangeRegression:
-    """Prove that clicking the empty-library CTA cannot be overwritten back
-    to Videos by the segmented_control widget on rerun.
+    """Prove that navigation state changes do not mutate a widget-owned
+    session_state key after widget instantiation (StreamlitAPIException fix).
 
-    This is a logic-level test of the shared-key invariant:
-    - When nav_view == "create" (set by CTA), the segmented_control
-      uses key="nav_view" and therefore reads "create" — it does NOT
-      restore a stale "videos" value from a separate widget key.
+    The 11H.1.15 regression bound segmented_control to key="nav_view" and
+    then mutated st.session_state["nav_view"] after widget creation. Streamlit
+    raises StreamlitAPIException for this pattern.
+
+    Fix: the segmented_control must NOT use key="nav_view". Application
+    navigation state lives in st.session_state["nav_view"], managed by
+    _switch_nav_view(). The widget either has no key or uses a separate key.
     """
 
     def test_no_duplicate_session_state_key_for_nav(self):
         """There must be exactly ONE session_state key controlling nav,
-        and the segmented_control must write to it (no separate widget key)."""
+        and the segmented_control must NOT own it."""
         source = _read_source()
         nav_keys = set(re.findall(r'session_state\["(nav_view[^"]*)"\]', source))
         assert nav_keys == {"nav_view"}, f"Expected only 'nav_view', found: {nav_keys}"
 
-    def test_segmented_control_key_equals_consumed_key(self):
-        """The seg_control key and the dispatcher's session_state key
-        must be the same string."""
+    def test_segmented_control_does_not_own_nav_view_key(self):
+        """The seg_control must NOT use key='nav_view' (that would make it
+        own the app state key and trigger StreamlitAPIException on mutation)."""
         tree = _parse()
         source = _read_source()
 
@@ -147,11 +158,102 @@ class TestNavigationStateChangeRegression:
                         if kw.arg == "key" and isinstance(kw.value, ast.Constant):
                             seg_key = kw.value.value
 
-        func = _func_def(tree, "_render_application")
-        func_source = ast.get_source_segment(source, func)
-        assert seg_key == "nav_view"
-        assert "nav_view" in func_source
-        assert seg_key in func_source
+        assert seg_key != "nav_view", (
+            "segmented_control must not use key='nav_view' because _switch_nav_view "
+            "mutates st.session_state['nav_view'] after widget creation"
+        )
+        assert "nav_view" in source  # app state key still exists
+
+
+class TestNavigationStreamlitLifecycleSafety:
+    """Regression tests for the StreamlitAPIException navigation bug.
+
+    Streamlit forbids mutating a widget-owned session_state key after the
+    widget is instantiated. The 11H.1.15 regression used key="nav_view"
+    on the segmented_control and then wrote st.session_state["nav_view"]
+    in _switch_nav_view() after widget creation.
+    """
+
+    def test_no_post_widget_nav_view_mutation_in_top_bar(self):
+        """_render_top_bar must not directly assign st.session_state['nav_view']
+        after the segmented_control widget is created."""
+        tree = _parse()
+        func = _func_def(tree, "_render_top_bar")
+        func_source = ast.get_source_segment(_read_source(), func)
+
+        assert "_switch_nav_view" in func_source
+        assert 'st.session_state["nav_view"] =' not in func_source
+
+    def test_no_direct_nav_view_assignment_outside_switch_helper(self):
+        """No function except _switch_nav_view may directly assign
+        st.session_state['nav_view']."""
+        tree = _parse()
+        source = _read_source()
+
+        func_sources = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                seg = ast.get_source_segment(source, node)
+                if seg:
+                    func_sources[node.name] = seg
+
+        assert "_switch_nav_view" in func_sources
+        switch_source = func_sources["_switch_nav_view"]
+        assert 'st.session_state["nav_view"] =' in switch_source
+
+        for func_name, src in func_sources.items():
+            if func_name == "_switch_nav_view":
+                continue
+            assert 'st.session_state["nav_view"] =' not in src, (
+                f"{func_name} directly assigns st.session_state['nav_view']; "
+                f"use _switch_nav_view instead"
+            )
+
+    def test_no_duplicate_segmented_control_widgets(self):
+        """There must be exactly one segmented_control widget for navigation
+        in _render_top_bar (other helpers like stable_segmented_control
+        are separate utilities)."""
+        tree = _parse()
+        source = _read_source()
+
+        top_bar_func = _func_def(tree, "_render_top_bar")
+        top_bar_source = ast.get_source_segment(source, top_bar_func)
+
+        count = 0
+        for node in ast.walk(ast.parse(top_bar_source)):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr == "segmented_control":
+                    count += 1
+        assert count == 1, f"Expected exactly 1 segmented_control in _render_top_bar, found {count}"
+
+    def test_nav_view_comparison_before_switch(self):
+        """_render_top_bar must compare selected_nav with current_nav before
+        calling _switch_nav_view, avoiding unnecessary reruns."""
+        tree = _parse()
+        func = _func_def(tree, "_render_top_bar")
+        func_source = ast.get_source_segment(_read_source(), func)
+
+        assert "selected_nav and selected_nav != current_nav" in func_source, (
+            "_render_top_bar must compare selected_nav with current_nav before "
+            "calling _switch_nav_view"
+        )
+
+    def test_cta_buttons_use_switch_nav_view(self):
+        """All navigation CTA buttons must use _switch_nav_view, not raw
+        session_state assignment."""
+        tree = _parse()
+        source = _read_source()
+
+        cta_funcs = ["_render_videos_view"]
+        for func_name in cta_funcs:
+            func = _func_def(tree, func_name)
+            func_source = ast.get_source_segment(source, func)
+            assert "_switch_nav_view" in func_source, (
+                f"{func_name} must use _switch_nav_view for navigation"
+            )
+            assert 'st.session_state["nav_view"] =' not in func_source, (
+                f"{func_name} must not directly assign st.session_state['nav_view']"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

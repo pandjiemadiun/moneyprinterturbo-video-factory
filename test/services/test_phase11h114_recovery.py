@@ -435,15 +435,20 @@ class TestNavigationCanonicalState:
         assert "nav_view_selector" not in source
 
     def test_segmented_control_uses_canonical_key(self):
-        """The segmented_control key must be "nav_view" (the canonical state)."""
+        """The segmented_control must NOT use key='nav_view' because that
+        would bind the widget to the app state key, causing
+        StreamlitAPIException when _switch_nav_view mutates it after
+        widget creation."""
         source = WEBUI_MAIN.read_text(encoding="utf-8")
         tree = ast.parse(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and _attribute_name(node.func) == "st.segmented_control":
                 for kw in node.keywords:
                     if kw.arg == "key" and isinstance(kw.value, ast.Constant):
-                        assert kw.value.value == "nav_view", (
-                            f"segmented_control key must be 'nav_view', got {kw.value.value!r}"
+                        assert kw.value.value != "nav_view", (
+                            "segmented_control key must NOT be 'nav_view' because "
+                            "_switch_nav_view mutates st.session_state['nav_view'] "
+                            "after widget creation"
                         )
 
     def test_switch_nav_view_helper_exists(self):

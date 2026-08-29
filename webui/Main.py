@@ -1442,11 +1442,10 @@ def _render_top_bar():
                 tr("Navigation"),
                 options=list(nav_options.keys()),
                 format_func=lambda k: nav_options[k],
-                key="nav_view",
                 default=current_nav,
                 label_visibility="collapsed",
             )
-            if selected_nav:
+            if selected_nav and selected_nav != current_nav:
                 _switch_nav_view(selected_nav)
 
             _render_task_manager_entry()
