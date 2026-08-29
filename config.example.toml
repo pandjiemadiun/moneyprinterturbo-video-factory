@@ -58,9 +58,28 @@ edge_tts_timeout = 30
 # 默认应保持开启；仅在可信代理或自签名证书环境中临时关闭。
 tls_verify = true
 
-# -----------------------------------------------------------------------------
-# Video Materials / 视频素材
-# -----------------------------------------------------------------------------
+# YouTube cookies file for authenticated downloads. Leave empty to rely on
+# PO token provider or browser fallback. YouTube blocks unauthenticated
+# downloads with HTTP 403 / bot detection.
+youtube_cookies_file = ""
+
+# YouTube PO token provider URL (HTTP server mode). When set, yt-dlp will
+# request PO tokens from this endpoint before downloading. The bgutil
+# provider exposes /pot and /ping; example: http://127.0.0.1:4416
+youtube_po_token_provider_url = ""
+
+# yt-dlp player client for YouTube extraction. Common values: web, mweb,
+# tv, android, ios, android_vr. Default is web.
+youtube_player_client = "web"
+
+# Enable browser-based PO token fallback (requires nodriver + chromium).
+# Falls back to a headless browser session when the HTTP provider is
+# unreachable or returns invalid tokens.
+youtube_browser_fallback = true
+
+# Maximum download attempts per video (bgutil provider + browser fallback +
+# direct). 2 covers the full PO token stack while capping retry cost.
+youtube_max_provider_attempts = 2
 
 # Available values: "pexels", "pixabay", "coverr", "wavespeed", "loomloom",
 # "local".

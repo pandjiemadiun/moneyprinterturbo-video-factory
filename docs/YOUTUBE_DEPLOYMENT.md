@@ -16,61 +16,67 @@ Pixabay. It is **not** a replacement. See
 ### System packages
 
 ```bash
-apt-get install -y ffmpeg yt-dlp
+apt-get install -y ffmpeg chromium
 ```
 
 - **ffmpeg >= 7.0** — required for `scale` with
   `force_original_aspect_ratio=increase` and the `crop` filter used by the
   smart reframe pipeline.
-- **yt-dlp** — required for `ytsearch` flat playlist extraction and cookie-
-  authenticated downloads.
+- **chromium** — required for the browser-based PO token fallback (nodriver).
+- **Deno >= 2.3** — required for the `bgutil-ytdlp-pot-provider` HTTP server.
 
 ### Python packages
 
-In the MPT virtualenv (`/tmp/mptpy`):
+In the MPT virtualenv:
 
 ```bash
-pip install "yt-dlp>=2024.7.1"
+pip install yt-dlp==2026.8.19 bgutil-ytdlp-pot-provider==1.3.2 yt-dlp-ejs==0.8.0 yt-dlp-getpot-wpc==1.1.2 playwright==1.62.0
 ```
+
+### PO token provider
+
+Run `bgutil-ytdlp-pot-provider` as a sidecar service or standalone process:
+
+```bash
+deno run --allow-all https://deno.land/x/bgutil_ytdlp_pot_provider/main.ts --port 4416
+```
+
+The provider exposes:
+- `GET /ping` — health check
+- `GET /pot` — returns a fresh PO token for the configured player client
 
 ---
 
 ## Configuration
 
-### 1. YouTube cookies file
+### 1. Authentication
 
-YouTube blocks unauthenticated downloads with HTTP 403 ("Sign in to confirm
-you're not a bot"). To download YouTube videos, you must supply a cookies
-file.
+YouTube now supports two authentication methods. Configure at least one.
 
-#### Obtaining cookies
-
-1. Install the "Get cookies.txt" browser extension (Chrome/Firefox).
-2. Navigate to https://www.youtube.com
-3. Click the extension icon → **Export cookies** → save as
-   `youtube_cookies.txt`.
-4. Upload the file to a secure, non-public location on the server:
-
-```
-/opt/secrets/youtube_cookies.txt
-```
-
-#### Registering the cookies path in MPT config
+#### Option A: PO token provider (recommended)
 
 ```toml
 # /opt/MoneyPrinterTurbo/config.toml
 
-youtube_cookies_file = "/opt/secrets/youtube_cookies.txt"
-
-# Optional: explicitly configure which providers are searched for each scene.
-# When omitted, [pexels, pixabay, youtube] are tried in order.
-# video_source = "pexels"          # primary fallback (backward compat)
-# video_sources = ["pexels", "pixabay", "youtube"]
+youtube_po_token_provider_url = "http://127.0.0.1:4416"
+youtube_player_client = "web"
 ```
 
-> **Security**: The cookies file must NOT be in source control, must NOT be
-> passed via command-line arguments, and must NOT appear in logs. See
-> `YOUTUBE_FOOTAGE_ARCHITECTURE.md` §Security for details.
+#### Option B: Cookies file (legacy)
+
+```toml
+youtube_cookies_file = "/opt/secrets/youtube_cookies.txt"
+```
+
+#### Option C: Browser fallback (automatic)
+
+When `youtube_browser_fallback = true` (default), yt-dlp will attempt to
+extract PO tokens from a headless Chromium session via nodriver if the HTTP
+provider is unreachable.
+
+```toml
+youtube_browser_fallback = true
+```
 
 ### 2. Factory configuration
 
@@ -98,7 +104,7 @@ available but not enabled in the default `video_sources` list.
 
 ### Enable YouTube
 
-1. Set `youtube_cookies_file` in `config.toml`.
+1. Configure `youtube_po_token_provider_url` (and optionally `youtube_cookies_file`) in `config.toml`.
 2. Add `"youtube"` to the `video_sources` list in config or pass it via the
    API payload.
 3. Restart the MPT service.
@@ -127,12 +133,29 @@ DEBUG combined video → 1080x1920 ✓
 
 ---
 
+## Failure modes and recovery
+
+YouTube downloads now use a 2-attempt recovery strategy:
+
+1. **bgutil HTTP provider** — requests a PO token from the configured HTTP endpoint
+2. **Browser fallback** — extracts a PO token from a headless Chromium session
+3. **Direct** — final fallback without PO token (legacy behavior)
+
+Failure categories are logged explicitly:
+- `playability_blocked` — YouTube player-response check failed (upstream IP-level block)
+- `provider_pot_failed` — HTTP provider returned a token but yt-dlp still failed
+- `browser_pot_failed` — browser fallback could not extract a token
+- `bot_detected` — HTTP 403 / bot detection
+- `generic_download_error` — other download errors
+
+---
+
 ## Rollback
 
 To disable YouTube:
 
 1. Remove `"youtube"` from `video_sources`.
-2. Remove `youtube_cookies_file` from config.
+2. Remove `youtube_po_token_provider_url` and `youtube_cookies_file` from config.
 3. Restart services.
 
 The existing Pexels/Pixabay pipeline is unaffected.

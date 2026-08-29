@@ -29,7 +29,7 @@ RUN set -u; \
     }; \
     install_system_dependencies() { \
         apt-get update && \
-        apt-get install -y --no-install-recommends git ffmpeg; \
+        apt-get install -y --no-install-recommends git ffmpeg nodejs npm chromium; \
     }; \
     retry_system_dependencies() { \
         attempt=1; \
@@ -89,6 +89,17 @@ RUN if [ "$PIP_USE_OFFICIAL" = "1" ]; then \
         pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com --retries 3 --timeout 60 -r requirements.txt || \
         pip install --no-cache-dir -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/ --trusted-host mirrors.tuna.tsinghua.edu.cn --retries 3 --timeout 60 -r requirements.txt || \
         pip install --no-cache-dir --retries 3 --timeout 60 -r requirements.txt; \
+    fi
+
+# Install Deno (required for yt-dlp-ejs PO token provider)
+RUN set -u; \
+    if ! command -v deno >/dev/null 2>&1; then \
+        echo "Installing Deno..."; \
+        curl -fsSL https://deno.land/install.sh | sh; \
+        ln -sf /root/.deno/bin/deno /usr/local/bin/deno; \
+        deno --version; \
+    else \
+        echo "Deno already installed: $(deno --version)"; \
     fi
 
 # Now copy the rest of the codebase into the image

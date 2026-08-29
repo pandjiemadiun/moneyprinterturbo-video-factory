@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import threading
 import time
+import asyncio
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 from urllib.parse import quote_plus, urlencode, urlparse, urlunsplit, parse_qs
@@ -720,6 +721,7 @@ def search_videos_youtube(
             "provider": "youtube",
             "search_term": search_term,
             "asset_id": str(video_id) if video_id else None,
+            "video_id": str(video_id) if video_id else None,
             "source_page": url,
             "title": title,
             "channel": channel,
@@ -747,45 +749,40 @@ def diagnose_youtube_material_failure(source: str = "youtube") -> str:
     if yt_dlp is None:
         return (
             "YouTube material download failed: yt_dlp is not installed. "
-            "Install yt-dlp (pip install yt-dlp) to enable the YouTube provider."
+            "Install yt-dlp to enable the YouTube provider."
         )
 
+    diag = _youtube_runtime_diagnostics()
     cookies_file = config.app.get("youtube_cookies_file", "").strip()
-    if not cookies_file:
+
+    if not cookies_file and not diag.get("po_token_provider_configured"):
         return (
-            "YouTube material download failed: "
-            "youtube_cookies_file is not configured in config.toml. "
-            "YouTube blocks unauthenticated downloads with HTTP 403/bot detection; "
-            "configure a valid YouTube cookies file to allow downloads."
+            "YouTube material download failed: no authentication configured. "
+            "Set youtube_cookies_file or youtube_po_token_provider_url in config.toml."
         )
 
-    file_exists = os.path.exists(cookies_file)
-    readable = os.access(cookies_file, os.R_OK) if file_exists else False
-    if not file_exists:
-        return (
-            f"YouTube material download failed: "
-            f"youtube_cookies_file is configured ({cookies_file}) but the file "
-            "does not exist at the configured path inside the worker runtime."
-        )
-    if not readable:
-        return (
-            f"YouTube material download failed: "
-            f"youtube_cookies_file ({cookies_file}) exists but is not readable "
-            "by the worker process."
-        )
+    if cookies_file:
+        if not diag.get("cookies_file_exists"):
+            return (
+                "YouTube material download failed: "
+                "youtube_cookies_file is configured but the file does not exist."
+            )
+        if not diag.get("cookies_file_readable"):
+            return (
+                "YouTube material download failed: "
+                "youtube_cookies_file exists but is not readable by the worker."
+            )
 
-    import shutil as _shutil
-    if not _shutil.which("ffmpeg"):
+    if not diag.get("ffmpeg_available"):
         return (
             "YouTube material download failed: ffmpeg is not installed; "
             "required to merge video/audio streams after yt-dlp extraction."
         )
 
     return (
-        "YouTube material download failed: search returned no usable videos, "
-        "or all candidates were rejected by the quality gate after download. "
-        "Check worker logs for the specific exception (403, format error, "
-        "or quality-gate rejection)."
+        "YouTube material download failed: all download attempts exhausted. "
+        "Check worker logs for the specific failure category (playability_blocked, "
+        "bot_detected, provider_pot_failed, etc.)."
     )
 
 
@@ -1461,18 +1458,181 @@ def _cleanup_failed_youtube_download(
             pass
 
 
+_YOUTUBE_PLAYER_CLIENTS = ("web", "mweb", "tv", "android_vr", "android", "ios")
+
+
+def _classify_youtube_failure(error_msg: str) -> str:
+    error_lower = str(error_msg).lower()
+    if any(k in error_lower for k in ("playability", "video unavailable", "player-response", "age_restriction", "unable to extract")):
+        return "playability_blocked"
+    if any(k in error_lower for k in ("403", "sign in", "bot", "forbidden")):
+        return "bot_detected"
+    if "provider" in error_lower and any(k in error_lower for k in ("unreachable", "connect", "connection")):
+        return "provider_unreachable"
+    if "ping" in error_lower and "fail" in error_lower:
+        return "provider_ping_failed"
+    if "nodriver" in error_lower or "playwright" in error_lower:
+        return "playwright_unavailable"
+    if "browser" in error_lower and any(k in error_lower for k in ("launch", "start")):
+        return "browser_launch_failed"
+    if "browser" in error_lower and "navigation" in error_lower:
+        return "browser_navigation_failed"
+    if "yt-dlp" in error_lower and "browser" in error_lower:
+        return "ytdlp_browser_failed"
+    if any(k in error_lower for k in ("browser po token", "browser_pot", "browser pot")):
+        return "browser_pot_failed"
+    if any(k in error_lower for k in ("po_token", "po token", "pot-provider", "pot provider")):
+        return "provider_pot_failed"
+    return "generic_download_error"
+
+
+def _build_youtube_ydl_opts(
+    video_path: str,
+    *,
+    po_token: Optional[str] = None,
+    player_client: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> dict:
+    opts = {
+        "format": "bestvideo[vcodec^=avc1][ext=mp4][height<=720]+bestaudio[acodec^=mp4a]/best",
+        "outtmpl": video_path,
+        "quiet": True,
+        "no_warnings": True,
+        "merge_output_format": "mp4",
+    }
+    client = player_client or "web"
+    if po_token:
+        opts["extractor_args"] = {"youtube": {"player_client": [client], "po_token": [po_token]}}
+    else:
+        opts["extractor_args"] = {"youtube": {"player_client": [client]}}
+    if cookies_file:
+        opts["cookiefile"] = cookies_file
+    return opts
+
+
+def _run_youtube_download_attempt(
+    video_url: str,
+    video_path: str,
+    *,
+    po_token: Optional[str] = None,
+    player_client: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+    attempt_label: str = "default",
+) -> tuple[str, Optional[str]]:
+    try:
+        ydl_opts = _build_youtube_ydl_opts(
+            video_path,
+            po_token=po_token,
+            player_client=player_client,
+            cookies_file=cookies_file,
+        )
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            return video_path, None
+        return "", f"yt-dlp {attempt_label} attempt: file not created after download"
+    except Exception as e:
+        return "", f"yt-dlp {attempt_label} attempt failed: error={type(e).__name__}, detail={str(e)[:300]}"
+
+
+def _fetch_po_token_from_provider(provider_url: str) -> Optional[str]:
+    if not provider_url:
+        return None
+    for endpoint in ("/pot", "/get_token", "/token", "/po_token"):
+        try:
+            url = provider_url.rstrip("/") + endpoint
+            resp = requests.get(url, timeout=(5, 15), verify=_get_tls_verify())
+            if resp.status_code == 200:
+                data = {}
+                ct = resp.headers.get("content-type", "")
+                if ct.startswith("application/json"):
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {}
+                token = data.get("pot") or data.get("token") or data.get("po_token") or data.get("player_response")
+                if token:
+                    return str(token)
+        except Exception:
+            continue
+    return None
+
+
+def _fetch_po_token_via_browser(video_url: str) -> Optional[str]:
+    try:
+        import nodriver as nd
+    except ImportError:
+        _record_youtube_failure("playwright_unavailable", "nodriver is not installed; browser fallback unavailable")
+        return None
+    try:
+        import asyncio
+        async def _extract():
+            browser = await nd.start(headless=True, browser_args=["--no-sandbox"])
+            try:
+                page = await browser.get(video_url)
+                await page.sleep(2)
+                token = await page.evaluate("""
+                    () => {
+                        try {
+                            const yt = window.yt;
+                            if (!yt) return "";
+                            const cfg = yt.getConfig ? yt.getConfig() : {};
+                            return cfg.pot || cfg.po_token || "";
+                        } catch (e) {
+                            return "";
+                        }
+                    }
+                """)
+                return token if token else None
+            finally:
+                await browser.quit()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(_extract())
+        else:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(asyncio.run, _extract())
+                return future.result(timeout=30)
+    except Exception as e:
+        _record_youtube_failure("browser_launch_failed", str(e)[:200])
+        return None
+
+
+def _youtube_runtime_diagnostics() -> dict:
+    cookies_file = config.app.get("youtube_cookies_file", "").strip()
+    diag = {
+        "yt_dlp_installed": yt_dlp is not None,
+        "cookies_file_configured": bool(cookies_file),
+        "cookies_file_exists": os.path.exists(cookies_file) if cookies_file else False,
+        "cookies_file_readable": os.access(cookies_file, os.R_OK) if cookies_file and os.path.exists(cookies_file) else False,
+        "ffmpeg_available": shutil.which("ffmpeg") is not None,
+        "po_token_provider_configured": bool(config.app.get("youtube_po_token_provider_url", "").strip()),
+        "browser_fallback_enabled": config.app.get("youtube_browser_fallback", True),
+        "max_provider_attempts": int(config.app.get("youtube_max_provider_attempts", 2)),
+    }
+    return diag
+
+
+def _record_youtube_failure(category: str, detail: str) -> None:
+    logger.warning(f"youtube download failure: category={category}, detail={detail[:200]}")
+
+
 def save_video_youtube(video_url: str, save_dir: str = "") -> str:
     """Download a YouTube video via yt_dlp.
 
-    Uses the ``cookiefile`` from ``config.app['youtube_cookies_file']`` when
-    configured.  Without cookies, YouTube blocks the download with HTTP 403
-    (bot detection) — in that case the function returns ``""`` (fail-clean),
+    Uses PO tokens from a configurable HTTP provider or browser fallback
+    (nodriver) when available.  Falls back to direct download when no PO
+    token mechanism is configured or when prior attempts fail.  Without
+    authentication, YouTube may block the download with HTTP 403 / bot
+    detection — in that case the function returns ``""`` (fail-clean),
     allowing the caller to try the next provider.
 
     Returns the local file path on success, ``""`` on failure.
     """
     if yt_dlp is None:
-        logger.error("yt_dlp is not installed; YouTube download unavailable")
+        _record_youtube_failure("generic_download_error", "yt_dlp is not installed")
         return ""
 
     if not save_dir:
@@ -1480,10 +1640,6 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    # Cache filename is derived from a canonical YouTube video identity so that
-    # distinct videos never collide in cache_videos/ (Phase 10H.1).  Equivalent
-    # supported URLs for the same video resolve to the same identity; non-YouTube
-    # or malformed URLs fall back to the prior URL-based key for safety.
     identity = _youtube_video_identity(video_url)
     if identity:
         url_hash = utils.md5(identity)
@@ -1496,59 +1652,61 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
         logger.info(f"youtube video already exists: {video_path}")
         return video_path
 
-    # Record whether the target existed BEFORE this download attempt.
-    # yt-dlp may leave partial artifacts (incomplete .mp4, .part, .ytdl, .Frag*)
-    # at or near video_path on failure.  We only clean up artifacts that this
-    # invocation could have created — if the file pre-existed as a valid cache,
-    # it is protected by the early-return above and we never reach this point.
-    # If the file pre-existed but was empty/invalid, we proceed to download
-    # (overwriting), and any partial left by this attempt must be cleaned.
     _existed_before = os.path.exists(video_path)
-
-    ydl_opts = {
-        # Phase 10H.2: prefer the highest-quality MP4/H.264 video stream <=720p
-        # plus compatible AAC audio, merged into an MP4 container.  The previous
-        # "best[ext=mp4][height<=720]" selected progressive 360p (format 18)
-        # because yt-dlp's `best` prefers complete streams over higher-quality
-        # DASH video-only formats.  The fallback "/best" keeps a safe progressive
-        # download when no H.264 DASH stream <=720p is available.
-        "format": "bestvideo[vcodec^=avc1][ext=mp4][height<=720]+bestaudio[acodec^=mp4a]/best",
-        "outtmpl": video_path,
-        "quiet": True,
-        "no_warnings": True,
-        "merge_output_format": "mp4",
-    }
-
     cookies_file = config.app.get("youtube_cookies_file", "").strip()
-    if cookies_file and os.path.exists(cookies_file):
-        ydl_opts["cookiefile"] = cookies_file
+    cookies_file = cookies_file if cookies_file and os.path.exists(cookies_file) else None
+    max_attempts = int(config.app.get("youtube_max_provider_attempts", 2))
+    po_token_provider_url = config.app.get("youtube_po_token_provider_url", "").strip()
+    player_client = config.app.get("youtube_player_client", "web").strip() or "web"
+    enable_browser_fallback = config.app.get("youtube_browser_fallback", True)
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
-    except yt_dlp.utils.DownloadError as e:
-        if "403" in str(e) or "Sign in" in str(e):
-            logger.error(
-                f"youtube download blocked (403/bot detection) for {video_url}; "
-                "set youtube_cookies_file in config.toml for authenticated downloads"
-            )
-        else:
-            logger.error(
-                f"youtube download failed: error={type(e).__name__}, "
-                f"detail={str(e)[:200]}"
-            )
-        _cleanup_failed_youtube_download(video_path, created_before=_existed_before)
-        return ""
-    except Exception as e:
-        logger.error(
-            f"youtube download failed: error={type(e).__name__}, "
-            f"detail={str(e)[:200]}"
-        )
-        _cleanup_failed_youtube_download(video_path, created_before=_existed_before)
-        return ""
+    attempts: list[tuple[str, Optional[str]]] = []
+    if po_token_provider_url:
+        attempts.append(("bgutil", po_token_provider_url))
+    if enable_browser_fallback:
+        attempts.append(("browser", None))
+    attempts.append(("direct", None))
+    attempts = attempts[:max_attempts]
 
-    if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
-        return video_path
+    last_error = ""
+    for attempt_label, provider_url in attempts:
+        if attempt_label == "bgutil":
+            po_token = _fetch_po_token_from_provider(provider_url)
+            if po_token is None:
+                _record_youtube_failure("provider_unreachable", f"PO token provider unreachable: {provider_url}")
+                continue
+            saved_path, error = _run_youtube_download_attempt(
+                video_url, video_path, po_token=po_token, player_client=player_client,
+                cookies_file=cookies_file, attempt_label="bgutil",
+            )
+            if saved_path:
+                return saved_path
+            _record_youtube_failure("provider_pot_failed", error)
+            last_error = error
+        elif attempt_label == "browser":
+            browser_po_token = _fetch_po_token_via_browser(video_url)
+            if browser_po_token is None:
+                _record_youtube_failure("browser_pot_failed", "browser PO token extraction failed")
+                continue
+            saved_path, error = _run_youtube_download_attempt(
+                video_url, video_path, po_token=browser_po_token, player_client=player_client,
+                cookies_file=cookies_file, attempt_label="browser",
+            )
+            if saved_path:
+                return saved_path
+            _record_youtube_failure("ytdlp_browser_failed", error)
+            last_error = error
+        elif attempt_label == "direct":
+            saved_path, error = _run_youtube_download_attempt(
+                video_url, video_path, player_client=player_client,
+                cookies_file=cookies_file, attempt_label="direct",
+            )
+            if saved_path:
+                return saved_path
+            _record_youtube_failure("generic_download_error", error)
+            last_error = error
+
+    _cleanup_failed_youtube_download(video_path, created_before=_existed_before)
     return ""
 
 

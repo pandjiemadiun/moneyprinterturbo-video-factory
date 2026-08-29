@@ -1637,12 +1637,20 @@ def _youtube_error_message(error: str, failed_stage: str | None) -> str:
     """Translate YouTube failure patterns into user-friendly messages."""
     error_lower = error.lower()
     if failed_stage == "materials":
+        if any(k in error_lower for k in ("playability", "video unavailable", "player-response")):
+            return tr("YouTube Error Playability")
+        if any(k in error_lower for k in ("provider_pot_failed", "provider_unreachable", "provider_ping_failed")):
+            return tr("YouTube Error Provider")
+        if any(k in error_lower for k in ("browser_pot_failed", "browser_launch_failed", "browser_navigation_failed", "playwright_unavailable")):
+            return tr("YouTube Error Browser")
         if "no" in error_lower and ("found" in error_lower or "result" in error_lower):
             return tr("YouTube Error No Results")
         if "quality" in error_lower or "resolution" in error_lower:
             return tr("YouTube Error Quality")
         if "download" in error_lower or "403" in error_lower:
             return tr("YouTube Error Download")
+        if "generic_download_error" in error_lower or "ytdlp_browser_failed" in error_lower:
+            return tr("YouTube Error Generic")
     return tr("Video Generation Failed")
 
 

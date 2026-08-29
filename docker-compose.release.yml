@@ -19,3 +19,17 @@ services:
     command: [ "python3", "main.py" ]
     volumes: *common-volumes
     restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  bgutil-provider:
+    image: ghcr.io/antaloo/bgutil-ytdlp-pot-provider:latest
+    container_name: "bgutil-provider"
+    ports:
+      - "127.0.0.1:4416:4416"
+    restart: always
+    networks:
+      - mpt-network
+
+networks:
+  mpt-network:
+    external: true
