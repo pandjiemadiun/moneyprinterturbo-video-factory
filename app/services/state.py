@@ -233,17 +233,112 @@ class RedisState(BaseState):
         return value_str
 
 
-# Global state
+class SQLiteState(BaseState):
+    """SQLite-backed persistent task state.
+
+    Survives API restarts. Uses a single table with task_id as primary key
+    and JSON data column for flexible schema.
+    """
+
+    def __init__(self, db_path: str = "storage/tasks.db"):
+        import sqlite3
+        import os
+
+        self._db_path = db_path
+        os.makedirs(os.path.dirname(db_path) if os.path.dirname(db_path) else ".", exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                task_id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        self._conn.commit()
+
+    def update_task(self, task_id: str, state: int = 4, progress: int = 0, **kwargs):
+        progress = int(progress)
+        if progress > 100:
+            progress = 100
+
+        existing = self.get_task(task_id) or {}
+        merged = {
+            "task_id": task_id,
+            "state": state,
+            "progress": progress,
+            **existing,
+            **kwargs,
+        }
+        merged["state"] = state
+        merged["progress"] = progress
+
+        import json
+        import time
+
+        self._conn.execute(
+            "INSERT OR REPLACE INTO tasks (task_id, data, updated_at) VALUES (?, ?, ?)",
+            (task_id, json.dumps(merged), time.time()),
+        )
+        self._conn.commit()
+
+    def get_task(self, task_id: str):
+        import json
+
+        cursor = self._conn.execute("SELECT data FROM tasks WHERE task_id = ?", (task_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return json.loads(row[0])
+
+    def get_all_tasks(self, page: int, page_size: int):
+        import json
+
+        offset = (page - 1) * page_size
+        cursor = self._conn.execute(
+            "SELECT data FROM tasks ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (page_size, offset),
+        )
+        tasks = [json.loads(row[0]) for row in cursor.fetchall()]
+
+        cursor = self._conn.execute("SELECT COUNT(*) FROM tasks")
+        total = cursor.fetchone()[0]
+        return tasks, total
+
+    def patch_task(self, task_id: str, **kwargs) -> bool:
+        import json
+
+        existing = self.get_task(task_id)
+        if existing is None:
+            return False
+        existing.update(kwargs)
+        import time
+
+        self._conn.execute(
+            "UPDATE tasks SET data = ?, updated_at = ? WHERE task_id = ?",
+            (json.dumps(existing), time.time(), task_id),
+        )
+        self._conn.commit()
+        return True
+
+    def delete_task(self, task_id: str):
+        self._conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+        self._conn.commit()
 _enable_redis = config.app.get("enable_redis", False)
 _redis_host = config.app.get("redis_host", "localhost")
 _redis_port = config.app.get("redis_port", 6379)
 _redis_db = config.app.get("redis_db", 0)
 _redis_password = config.app.get("redis_password", None)
+_enable_sqlite = config.app.get("enable_sqlite_state", True)
+_sqlite_path = config.app.get("sqlite_state_path", "storage/tasks.db")
 
-state = (
-    RedisState(
+if _enable_redis:
+    state = RedisState(
         host=_redis_host, port=_redis_port, db=_redis_db, password=_redis_password
     )
-    if _enable_redis
-    else MemoryState()
-)
+elif _enable_sqlite:
+    state = SQLiteState(db_path=_sqlite_path)
+else:
+    state = MemoryState()
