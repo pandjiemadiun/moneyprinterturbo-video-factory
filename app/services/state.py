@@ -243,15 +243,27 @@ class SQLiteState(BaseState):
     def __init__(self, db_path: str = "storage/tasks.db"):
         import sqlite3
         import os
+        import threading
 
         self._db_path = db_path
         os.makedirs(os.path.dirname(db_path) if os.path.dirname(db_path) else ".", exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._lock = threading.RLock()
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS tasks (
                 task_id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS batches (
+                batch_id TEXT PRIMARY KEY,
                 data TEXT NOT NULL,
                 updated_at REAL NOT NULL
             )
@@ -264,27 +276,28 @@ class SQLiteState(BaseState):
         if progress > 100:
             progress = 100
 
-        existing = self.get_task(task_id) or {}
-        merged = {
-            "task_id": task_id,
-            "state": state,
-            "progress": progress,
-            **existing,
-            **kwargs,
-        }
-        merged["state"] = state
-        merged["progress"] = progress
-
         import json
         import time
 
-        self._conn.execute(
-            "INSERT OR REPLACE INTO tasks (task_id, data, updated_at) VALUES (?, ?, ?)",
-            (task_id, json.dumps(merged), time.time()),
-        )
-        self._conn.commit()
+        with self._lock:
+            existing = self._get_task_unlocked(task_id) or {}
+            merged = {
+                "task_id": task_id,
+                "state": state,
+                "progress": progress,
+                **existing,
+                **kwargs,
+            }
+            merged["state"] = state
+            merged["progress"] = progress
 
-    def get_task(self, task_id: str):
+            self._conn.execute(
+                "INSERT OR REPLACE INTO tasks (task_id, data, updated_at) VALUES (?, ?, ?)",
+                (task_id, json.dumps(merged), time.time()),
+            )
+            self._conn.commit()
+
+    def _get_task_unlocked(self, task_id: str):
         import json
 
         cursor = self._conn.execute("SELECT data FROM tasks WHERE task_id = ?", (task_id,))
@@ -293,39 +306,74 @@ class SQLiteState(BaseState):
             return None
         return json.loads(row[0])
 
+    def get_task(self, task_id: str):
+        with self._lock:
+            return self._get_task_unlocked(task_id)
+
     def get_all_tasks(self, page: int, page_size: int):
         import json
 
-        offset = (page - 1) * page_size
-        cursor = self._conn.execute(
-            "SELECT data FROM tasks ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-            (page_size, offset),
-        )
-        tasks = [json.loads(row[0]) for row in cursor.fetchall()]
+        with self._lock:
+            offset = (page - 1) * page_size
+            cursor = self._conn.execute(
+                "SELECT data FROM tasks ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                (page_size, offset),
+            )
+            tasks = [json.loads(row[0]) for row in cursor.fetchall()]
 
-        cursor = self._conn.execute("SELECT COUNT(*) FROM tasks")
-        total = cursor.fetchone()[0]
-        return tasks, total
+            cursor = self._conn.execute("SELECT COUNT(*) FROM tasks")
+            total = cursor.fetchone()[0]
+            return tasks, total
 
     def patch_task(self, task_id: str, **kwargs) -> bool:
         import json
-
-        existing = self.get_task(task_id)
-        if existing is None:
-            return False
-        existing.update(kwargs)
         import time
 
-        self._conn.execute(
-            "UPDATE tasks SET data = ?, updated_at = ? WHERE task_id = ?",
-            (json.dumps(existing), time.time(), task_id),
-        )
-        self._conn.commit()
-        return True
+        with self._lock:
+            existing = self._get_task_unlocked(task_id)
+            if existing is None:
+                return False
+            existing.update(kwargs)
+            self._conn.execute(
+                "UPDATE tasks SET data = ?, updated_at = ? WHERE task_id = ?",
+                (json.dumps(existing), time.time(), task_id),
+            )
+            self._conn.commit()
+            return True
 
     def delete_task(self, task_id: str):
-        self._conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+            self._conn.commit()
+
+    # Batch persistence
+    def save_batch(self, batch_id: str, data: dict):
+        import json
+        import time
+
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO batches (batch_id, data, updated_at) VALUES (?, ?, ?)",
+                (batch_id, json.dumps(data), time.time()),
+            )
+            self._conn.commit()
+
+    def get_batch(self, batch_id: str) -> dict | None:
+        import json
+
+        with self._lock:
+            cursor = self._conn.execute("SELECT data FROM batches WHERE batch_id = ?", (batch_id,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return json.loads(row[0])
+
+    def get_all_batches(self) -> list[dict]:
+        import json
+
+        with self._lock:
+            cursor = self._conn.execute("SELECT data FROM batches ORDER BY updated_at DESC")
+            return [json.loads(row[0]) for row in cursor.fetchall()]
 _enable_redis = config.app.get("enable_redis", False)
 _redis_host = config.app.get("redis_host", "localhost")
 _redis_port = config.app.get("redis_port", 6379)

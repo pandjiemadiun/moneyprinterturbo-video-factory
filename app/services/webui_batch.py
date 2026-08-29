@@ -63,9 +63,18 @@ def submit_batch(
                 f"(subject={topic.get('subject', 'N/A')!r}): {exc}"
             )
 
-    logger.success(
-        f"batch {batch_id}: submitted {len(task_ids)} tasks"
-    )
+    # Persist batch metadata
+    try:
+        webui_api_client.api_save_batch(batch_id, {
+            "batch_id": batch_id,
+            "created_at": datetime.now().isoformat(),
+            "task_ids": task_ids,
+            "total": len(task_ids),
+            "status": "running",
+        })
+    except Exception as exc:
+        logger.warning(f"failed to persist batch {batch_id}: {exc}")
+
     return batch_id, task_ids
 
 

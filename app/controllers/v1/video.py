@@ -573,3 +573,29 @@ def retry_task(request: Request, task_id: str):
             message=result["message"],
         )
     return utils.get_response(200, {"status": "retried", "task_id": task_id, "new_task_id": result.get("new_task_id", "")})
+
+
+@router.post("/batches", summary="Save batch metadata")
+def save_batch(request: Request, body: dict):
+    """Save batch metadata to persistent storage."""
+    batch_id = body.get("batch_id", "")
+    if not batch_id:
+        raise HttpException(task_id=base.get_task_id(request), status_code=422, message="batch_id required")
+    sm.state.save_batch(batch_id, body)
+    return utils.get_response(200, {"status": "saved", "batch_id": batch_id})
+
+
+@router.get("/batches/{batch_id}", summary="Get batch metadata")
+def get_batch(request: Request, batch_id: str):
+    """Get batch metadata from persistent storage."""
+    data = sm.state.get_batch(batch_id)
+    if data is None:
+        raise HttpException(task_id=base.get_task_id(request), status_code=404, message="batch not found")
+    return utils.get_response(200, data)
+
+
+@router.get("/batches", summary="List all batches")
+def list_batches(request: Request):
+    """List all batch metadata."""
+    batches = sm.state.get_all_batches()
+    return utils.get_response(200, {"batches": batches})

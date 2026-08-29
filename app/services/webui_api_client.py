@@ -149,3 +149,36 @@ def api_retry_task(task_id: str) -> dict:
     except Exception as exc:
         logger.error(f"api_retry_task failed: {exc}")
         return {"success": False, "message": str(exc)}
+
+
+def api_save_batch(batch_id: str, data: dict) -> dict:
+    """Save batch metadata via API."""
+    base_url = _get_api_base_url()
+    try:
+        resp = httpx.post(
+            f"{base_url}/api/v1/batches",
+            json=data,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json().get("data", {"success": True})
+    except Exception as exc:
+        logger.error(f"api_save_batch failed: {exc}")
+        return {"success": False, "message": str(exc)}
+
+
+def api_get_batch(batch_id: str) -> dict | None:
+    """Get batch metadata via API."""
+    base_url = _get_api_base_url()
+    try:
+        resp = httpx.get(
+            f"{base_url}/api/v1/batches/{batch_id}",
+            timeout=10,
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json().get("data")
+    except Exception as exc:
+        logger.warning(f"api_get_batch failed: {exc}")
+        return None
