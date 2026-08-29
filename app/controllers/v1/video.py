@@ -207,7 +207,11 @@ def create_task(
             "params": body.model_dump(),
         }
         from app.models import const
-        sm.state.update_task(task_id, state=const.TASK_STATE_QUEUED)
+        sm.state.update_task(
+            task_id,
+            state=const.TASK_STATE_QUEUED,
+            params=body.model_dump(),
+        )
         try:
             task_manager.add_task(
                 tm.start, task_id=task_id, params=body, stop_at=stop_at

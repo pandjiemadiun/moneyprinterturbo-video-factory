@@ -171,7 +171,7 @@ def clear_all_tasks() -> dict:
 def retry_task(task_id: str) -> dict:
     """Retry a failed task. Creates a new task with the same parameters."""
     from app.services.task import start as tm_start
-    from app.controllers.manager.memory_manager import _task_manager
+    from app.controllers.v1.video import task_manager as api_task_manager
 
     task = sm.state.get_task(task_id)
     if task is None:
@@ -182,8 +182,7 @@ def retry_task(task_id: str) -> dict:
         return {"success": False, "message": "only failed or cancelled tasks can be retried"}
 
     # Get original parameters
-    script_data = task.get("script_data", {})
-    params_dict = script_data.get("params", {})
+    params_dict = task.get("params", {})
     if not params_dict:
         return {"success": False, "message": "original parameters not available"}
 
@@ -194,8 +193,8 @@ def retry_task(task_id: str) -> dict:
     except Exception as exc:
         return {"success": False, "message": f"invalid parameters: {exc}"}
 
-    # Submit to task manager
-    _task_manager.add_task(
+    # Submit to API task manager
+    api_task_manager.add_task(
         tm_start,
         task_id=new_task_id,
         params=params,

@@ -14,9 +14,9 @@ from loguru import logger
 def _get_api_base_url() -> str:
     """Get the API base URL.
 
-    When running in Docker, the API is reachable via the service name or localhost.
+    When running in Docker, the API is reachable via the container name on the mpt-network.
     """
-    return os.getenv("MPT_API_BASE_URL", "http://127.0.0.1:8080")
+    return os.getenv("MPT_API_BASE_URL", "http://moneyprinterturbo-api:8080")
 
 
 def _get_request_id() -> str:

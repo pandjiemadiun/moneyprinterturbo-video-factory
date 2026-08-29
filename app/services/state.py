@@ -66,12 +66,17 @@ class MemoryState(BaseState):
             progress = 100
 
         with self._lock:
-            self._tasks[task_id] = {
+            existing = self._tasks.get(task_id, {})
+            merged = {
                 "task_id": task_id,
                 "state": state,
                 "progress": progress,
+                **existing,
                 **kwargs,
             }
+            merged["state"] = state
+            merged["progress"] = progress
+            self._tasks[task_id] = merged
 
     def get_task(self, task_id: str):
         with self._lock:
