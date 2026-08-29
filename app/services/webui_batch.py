@@ -1,8 +1,7 @@
 """Batch service for WebUI content-factory workflow.
 
 Enables creating multiple video generation tasks as a grouped batch.
-Batch metadata is stored in Streamlit session state (per-session persistence).
-Task states are read from the existing state backend.
+All operations go through the API. WebUI never owns task state.
 """
 
 import uuid
@@ -12,14 +11,13 @@ from loguru import logger
 
 from app.config import config
 from app.models.schema import VideoParams
-from app.services import state as sm
-from app.services import webui_task
+from app.services import webui_api_client
 
 
 def submit_batch(
     topics: list[dict],
     common_params: dict,
-) -> str:
+) -> tuple[str, list[str]]:
     """Submit multiple video generation tasks as a batch.
 
     Args:
@@ -49,14 +47,11 @@ def submit_batch(
     task_ids = []
 
     for index, topic in enumerate(topics, start=1):
-        task_id = str(uuid.uuid4())
         task_params = _build_task_params(topic, common_params, index)
 
         try:
-            webui_task.submit_generation(
-                task_id=task_id,
-                params=task_params,
-            )
+            result = webui_api_client.api_create_task(task_params.model_dump())
+            task_id = result.get("task_id", str(uuid.uuid4()))
             task_ids.append(task_id)
             logger.info(
                 f"batch {batch_id}: submitted task {index}/{len(topics)} "
@@ -67,7 +62,6 @@ def submit_batch(
                 f"batch {batch_id}: failed to submit task {index}/{len(topics)} "
                 f"(subject={topic.get('subject', 'N/A')!r}): {exc}"
             )
-            task_ids.append(task_id)
 
     logger.success(
         f"batch {batch_id}: submitted {len(task_ids)} tasks"
@@ -99,7 +93,7 @@ def get_batch_status(task_ids: list[str]) -> dict:
     total_progress = 0.0
 
     for task_id in task_ids:
-        task = sm.state.get_task(task_id)
+        task = webui_api_client.api_get_task(task_id)
         if task is None:
             failed += 1
             continue
@@ -142,7 +136,7 @@ def get_batch_tasks(task_ids: list[str]) -> list[dict]:
     """
     tasks = []
     for task_id in task_ids:
-        task = sm.state.get_task(task_id)
+        task = webui_api_client.api_get_task(task_id)
         if task is not None:
             task["task_id"] = task_id
             tasks.append(task)
