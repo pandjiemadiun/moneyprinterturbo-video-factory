@@ -382,18 +382,19 @@ def test_generation_submit_skips_duplicate_config_save():
         if isinstance(node, ast.FunctionDef)
         and node.name == "_render_generation_controls"
     )
-    application = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_render_application"
-    )
 
     assert isinstance(controls.body[-1], ast.Return)
     assert ast.unparse(controls.body[-1].value) == "start_button"
 
+    create_view = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_render_create_view"
+    )
+
     submitted_assignment = next(
         node
-        for node in application.body
+        for node in create_view.body
         if isinstance(node, ast.Assign)
         and any(
             isinstance(target, ast.Name) and target.id == "generation_submitted"
@@ -407,7 +408,7 @@ def test_generation_submit_skips_duplicate_config_save():
 
     guarded_save = next(
         node
-        for node in application.body
+        for node in create_view.body
         if isinstance(node, ast.If)
         and ast.unparse(node.test) == "not generation_submitted"
     )

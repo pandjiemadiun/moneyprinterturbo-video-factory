@@ -377,6 +377,16 @@ div[class*="st-key-task_row_"] button[kind="secondary"] p {
         padding: 0 0.5rem !important;
     }
 
+    /* 导航控件在小屏下占满宽度 */
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+
+    [data-testid="stHorizontalBlock"] [data-testid="stColumn"] {
+        min-width: auto !important;
+    }
+}
+
     button[data-testid="stBaseButton-secondary"],
     button[data-testid="stBaseButton-primary"] {
         min-height: 2.5rem;
@@ -465,5 +475,10 @@ div[class*="st-key-task_row_"] button[kind="secondary"] p {
         flex: 1 1 0 !important;
         width: auto !important;
         min-width: 1.75rem !important;
+    }
+
+    /* 导航控件在窄屏下自动换行 */
+    div:has(> [data-testid="stMarkdown"] > p) {
+        flex-wrap: wrap !important;
     }
 }

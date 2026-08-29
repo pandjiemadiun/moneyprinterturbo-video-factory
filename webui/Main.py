@@ -1433,7 +1433,7 @@ def _render_pending_version_check():
 
 
 def _render_top_bar():
-    """渲染品牌、任务管理、设置和语言切换组成的页面顶部栏。"""
+    """渲染品牌、导航、任务管理、设置和语言切换组成的页面顶部栏。"""
     # 顶部栏分为品牌区和操作区两个独立区域。窄屏下由 Streamlit
     # 将两个区域整体换行，操作区内部再根据剩余宽度自动换行。
     with st.container(key="top_bar"):
@@ -1448,7 +1448,7 @@ def _render_top_bar():
         if update_snapshot.complete:
             _render_brand(update_snapshot.available_version)
         else:
-            _render_pending_version_check()
+            _render_brand()
 
     with actions_col:
         with st.container(
@@ -1459,6 +1459,23 @@ def _render_top_bar():
             gap="small",
             width="stretch",
         ):
+            nav_options = {
+                "create": tr("Nav Create"),
+                "videos": tr("Nav Videos"),
+                "jobs": tr("Nav Jobs"),
+            }
+            current_nav = st.session_state.get("nav_view", "create")
+            selected_nav = st.segmented_control(
+                tr("Navigation"),
+                options=list(nav_options.keys()),
+                format_func=lambda k: nav_options[k],
+                key="nav_view_selector",
+                default=current_nav,
+                label_visibility="collapsed",
+            )
+            if selected_nav:
+                st.session_state["nav_view"] = selected_nav
+
             _render_task_manager_entry()
 
             if st.button(
@@ -1485,21 +1502,9 @@ def _render_top_bar():
                 label_visibility="collapsed",
                 width=180,
             )
-            if selected_language_code:
-                previous_language = st.session_state.get("ui_language", "")
-                if selected_language_code != previous_language:
-                    logger.info(
-                        "UI language changed by user: "
-                        f"previous_language={previous_language or '<empty>'}, "
-                        f"selected_language={selected_language_code}"
-                    )
-                    st.session_state["ui_language"] = selected_language_code
-                    # 浏览器自动识别只影响当前会话；只有用户主动切换下拉框时才
-                    # 写入 config.toml，后续新会话将优先使用该明确选择。
-                    _set_runtime_config("ui", "language", selected_language_code)
-                    _save_runtime_config()
-                    # 切换语言后强制刷新，避免 selectbox 继续展示旧语言文案。
-                    st.rerun()
+            if selected_language_code != st.session_state.get("ui_language", ""):
+                st.session_state["ui_language"] = selected_language_code
+                st.rerun()
 
 
 support_locales = [
@@ -5980,7 +5985,7 @@ def _render_generation_controls(
 
 
 def _render_application():
-    """按固定顺序渲染顶部栏、弹窗、生成表单和任务结果。"""
+    """按固定顺序渲染顶部栏、弹窗和当前导航视图。"""
     _render_top_bar()
 
     if st.session_state.get("settings_dialog_open", False):
@@ -5997,6 +6002,17 @@ def _render_application():
     if restore_applied or restore_succeeded:
         st.success(tr("Task Configuration Loaded"))
 
+    nav_view = st.session_state.get("nav_view", "create")
+    if nav_view == "videos":
+        _render_videos_view()
+    elif nav_view == "jobs":
+        _render_jobs_view()
+    else:
+        _render_create_view()
+
+
+def _render_create_view():
+    """渲染创建视频的主表单视图。"""
     with st.container(key="main_settings_grid"):
         panel = st.columns(4)
     left_panel = panel[0]
@@ -6029,6 +6045,61 @@ def _render_application():
     # 如果后台任务正在使用配置，配置层会在任务结束时自动应用并落盘最新值。
     if not generation_submitted:
         _save_runtime_config()
+
+
+def _render_videos_view():
+    """渲染视频库视图，展示所有已完成视频的缩略图和播放/下载控件。"""
+    st.write(tr("Videos Title"))
+
+    tasks = _collect_task_summaries()
+    completed_tasks = [t for t in tasks if t.get("state") == const.TASK_STATE_COMPLETE]
+
+    if not completed_tasks:
+        st.info(tr("Videos Empty"))
+        return
+
+    st.caption(tr("Videos Count").format(count=len(completed_tasks)))
+
+    for task in completed_tasks:
+        _render_video_card(task)
+
+
+def _render_video_card(task):
+    """渲染单个视频卡片，包含缩略图、元数据和操作控件。"""
+    task_id = task.get("task_id", "")
+    videos = task.get("videos") or []
+    thumbnails = task.get("thumbnails") or []
+
+    with st.container(border=True):
+        for i, video_url in enumerate(videos):
+            cols = st.columns([1, 2])
+            with cols[0]:
+                if i < len(thumbnails) and thumbnails[i]:
+                    try:
+                        st.image(thumbnails[i], use_container_width=True)
+                    except Exception:
+                        pass
+            with cols[1]:
+                st.write(f"**{task.get('video_subject', task_id)}**")
+                if task.get("video_source"):
+                    st.caption(tr("Video Source Label").format(source=task["video_source"]))
+                updated = task.get("updated_at", "")
+                if updated:
+                    st.caption(updated[:19])
+                if video_url and os.path.isfile(video_url):
+                    with open(video_url, "rb") as f:
+                        st.download_button(
+                            tr("Download Video"),
+                            data=f,
+                            file_name=_build_video_download_name(task.get("video_subject"), i + 1, len(videos)),
+                            key=f"vid_dl_{task_id}_{i}",
+                        )
+
+
+def _render_jobs_view():
+    """渲染任务管理视图，展示所有任务的状态和进度。"""
+    st.write(tr("Jobs Title"))
+    _render_task_manager_panel()
 
 
 _render_application()
