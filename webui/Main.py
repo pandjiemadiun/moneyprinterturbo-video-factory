@@ -6155,7 +6155,7 @@ def _render_jobs_view():
                 '</div>',
                 unsafe_allow_html=True,
             )
-        return
+            return
 
     # 统计
     queued = sum(1 for t in tasks if t.get("state") not in [const.TASK_STATE_COMPLETE, const.TASK_STATE_FAILED, -1, 1])
@@ -6176,9 +6176,66 @@ def _render_jobs_view():
 
     st.divider()
 
+    # 清理操作
+    with st.expander(tr("Jobs Cleanup Title"), expanded=False):
+        st.write(tr("Jobs Cleanup Desc"))
+        cleanup_cols = st.columns(4)
+        with cleanup_cols[0]:
+            if st.button(tr("Jobs Clear Completed"), key="btn_clear_completed"):
+                count = _api_clear_tasks("completed")
+                st.success(tr("Jobs Cleared").format(count=count))
+                st.rerun()
+        with cleanup_cols[1]:
+            if st.button(tr("Jobs Clear Failed"), key="btn_clear_failed"):
+                count = _api_clear_tasks("failed")
+                st.success(tr("Jobs Cleared").format(count=count))
+                st.rerun()
+        with cleanup_cols[2]:
+            if st.button(tr("Jobs Clear Orphan"), key="btn_clear_orphan"):
+                count = _api_clear_tasks("orphan")
+                st.success(tr("Jobs Cleared").format(count=count))
+                st.rerun()
+        with cleanup_cols[3]:
+            if st.button(tr("Jobs Clear All"), key="btn_clear_all", type="primary"):
+                count = _api_clear_all_tasks()
+                st.success(tr("Jobs Cleared").format(count=count))
+                st.rerun()
+
+    st.divider()
+
     # 任务列表
     for task in tasks:
         _render_job_card(task)
+
+
+def _api_clear_tasks(status: str) -> int:
+    """调用后端API清理指定状态的任务。"""
+    import requests
+    try:
+        resp = requests.post(
+            f"http://127.0.0.1:8080/api/v1/tasks/clear?status={status}",
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("data", {}).get("count", 0)
+    except Exception as e:
+        logger.warning(f"clear tasks failed: {e}")
+    return 0
+
+
+def _api_clear_all_tasks() -> int:
+    """调用后端API清理所有任务。"""
+    import requests
+    try:
+        resp = requests.post(
+            "http://127.0.0.1:8080/api/v1/tasks/clear-all",
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("data", {}).get("count", 0)
+    except Exception as e:
+        logger.warning(f"clear all tasks failed: {e}")
+    return 0
 
 
 def _render_job_card(task):

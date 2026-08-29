@@ -321,6 +321,35 @@ def delete_video(request: Request, task_id: str = Path(..., description="Task ID
     )
 
 
+@router.post("/tasks/clear", summary="Clear tasks by status")
+def clear_tasks(request: Request, status: str):
+    """Clear tasks by status: completed, failed, queued, orphan."""
+    from app.services import task_cleanup
+
+    request_id = base.get_task_id(request)
+    if status not in ("completed", "failed", "queued", "orphan"):
+        raise HttpException(
+            task_id=request_id, status_code=422, message="invalid status"
+        )
+    if status == "orphan":
+        count = task_cleanup.clear_orphan_tasks()
+    else:
+        count = task_cleanup.clear_tasks_by_status(status)
+    logger.info(f"cleared {count} tasks with status={status}, request_id={request_id}")
+    return utils.get_response(200, {"status": "cleared", "count": count, "target": status})
+
+
+@router.post("/tasks/clear-all", summary="Clear all tasks")
+def clear_all_tasks(request: Request):
+    """Clear ALL tasks. Destructive operation."""
+    from app.services import task_cleanup
+
+    request_id = base.get_task_id(request)
+    count = task_cleanup.clear_all_tasks()
+    logger.success(f"cleared all {count} tasks, request_id={request_id}")
+    return utils.get_response(200, {"status": "cleared_all", "count": count})
+
+
 @router.get(
     "/musics", response_model=BgmRetrieveResponse, summary="Retrieve local BGM files"
 )
