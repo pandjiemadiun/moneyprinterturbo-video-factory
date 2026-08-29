@@ -731,6 +731,64 @@ def search_videos_youtube(
     return video_items
 
 
+def diagnose_youtube_material_failure(source: str = "youtube") -> str:
+    """Produce a human-readable, secret-free diagnostic message when YouTube
+    material download fails.
+
+    This replaces the generic "failed to download video materials from youtube"
+    message so the user can immediately see *why* the failure occurred without
+    inspecting raw logs.
+
+    No cookies, API keys, or tokens are ever included in the returned string.
+    """
+    if source != "youtube":
+        return f"failed to download video materials from {source}"
+
+    if yt_dlp is None:
+        return (
+            "YouTube material download failed: yt_dlp is not installed. "
+            "Install yt-dlp (pip install yt-dlp) to enable the YouTube provider."
+        )
+
+    cookies_file = config.app.get("youtube_cookies_file", "").strip()
+    if not cookies_file:
+        return (
+            "YouTube material download failed: "
+            "youtube_cookies_file is not configured in config.toml. "
+            "YouTube blocks unauthenticated downloads with HTTP 403/bot detection; "
+            "configure a valid YouTube cookies file to allow downloads."
+        )
+
+    file_exists = os.path.exists(cookies_file)
+    readable = os.access(cookies_file, os.R_OK) if file_exists else False
+    if not file_exists:
+        return (
+            f"YouTube material download failed: "
+            f"youtube_cookies_file is configured ({cookies_file}) but the file "
+            "does not exist at the configured path inside the worker runtime."
+        )
+    if not readable:
+        return (
+            f"YouTube material download failed: "
+            f"youtube_cookies_file ({cookies_file}) exists but is not readable "
+            "by the worker process."
+        )
+
+    import shutil as _shutil
+    if not _shutil.which("ffmpeg"):
+        return (
+            "YouTube material download failed: ffmpeg is not installed; "
+            "required to merge video/audio streams after yt-dlp extraction."
+        )
+
+    return (
+        "YouTube material download failed: search returned no usable videos, "
+        "or all candidates were rejected by the quality gate after download. "
+        "Check worker logs for the specific exception (403, format error, "
+        "or quality-gate rejection)."
+    )
+
+
 # WaveSpeed AI (https://wavespeed.ai) 通过文生视频模型按脚本关键词直接生成素材，
 # 与三个库存素材源共用 MaterialInfo 结果结构和后续下载、剪辑流程。
 WAVESPEED_API_BASE_URL = "https://api.wavespeed.ai/api/v3"
@@ -2272,8 +2330,8 @@ def _download_videos_by_script_order(
                     f"downloading ordered {item.provider} video for {search_term!r}: "
                     f"asset_id={source_info.get('asset_id') or 'unknown'}"
                 )
-                saved_video_path = save_video(
-                    video_url=item.url, save_dir=material_directory
+                saved_video_path = _download_material_item(
+                    item, provider, material_directory
                 )
                 if saved_video_path:
                     logger.info(f"video saved: {saved_video_path}")

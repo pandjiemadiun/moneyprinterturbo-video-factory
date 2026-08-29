@@ -1399,6 +1399,12 @@ def _render_pending_version_check():
     _render_brand()
 
 
+def _switch_nav_view(view_name):
+    """Canonical navigation switch — single source of truth for nav state."""
+    st.session_state["nav_view"] = view_name
+    st.rerun()
+
+
 def _render_top_bar():
     """渲染品牌、导航、任务管理、设置和语言切换组成的页面顶部栏。"""
     # 顶部栏分为品牌区和操作区两个独立区域。窄屏下由 Streamlit
@@ -1436,12 +1442,12 @@ def _render_top_bar():
                 tr("Navigation"),
                 options=list(nav_options.keys()),
                 format_func=lambda k: nav_options[k],
-                key="nav_view_selector",
+                key="nav_view",
                 default=current_nav,
                 label_visibility="collapsed",
             )
             if selected_nav:
-                st.session_state["nav_view"] = selected_nav
+                _switch_nav_view(selected_nav)
 
             _render_task_manager_entry()
 
@@ -6040,8 +6046,7 @@ def _render_videos_view():
                 unsafe_allow_html=True,
             )
             if st.button(tr("Videos Empty CTA"), key="videos_empty_create"):
-                st.session_state["nav_view"] = "create"
-                st.rerun()
+                _switch_nav_view("create")
         return
 
     st.caption(tr("Videos Count").format(count=len(completed_tasks)))

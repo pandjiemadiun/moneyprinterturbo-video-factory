@@ -727,7 +727,7 @@ def get_video_materials(
             _mark_task_failed(
                 task_id,
                 "materials",
-                f"failed to download video materials from {params.video_source}",
+                material.diagnose_youtube_material_failure(params.video_source),
             )
             return None
         return downloaded_videos

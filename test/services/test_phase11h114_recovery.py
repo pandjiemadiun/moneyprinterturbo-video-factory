@@ -414,6 +414,73 @@ class TestTaskIdFlow:
 
 
 # ---------------------------------------------------------------------------
+# P0-A: NAVIGATION STATE (11H.1.15)
+# ---------------------------------------------------------------------------
+
+class TestNavigationCanonicalState:
+    """All navigation entry points must share ONE canonical state key (nav_view).
+
+    The 11H.1.13 audit found that _render_videos_view set
+    st.session_state["nav_view"] = "create" while _render_top_bar used a
+    SEPARATE widget key "nav_view_selector" whose stale value overwrote
+    the CTA's navigation on rerun.
+
+    Fix: the segmented_control uses key="nav_view" (the same canonical key
+    the CTA writes to), and all entry points go through _switch_nav_view().
+    """
+
+    def test_no_nav_view_selector_key(self):
+        """The widget must NOT use a separate key that can shadow nav_view."""
+        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        assert "nav_view_selector" not in source
+
+    def test_segmented_control_uses_canonical_key(self):
+        """The segmented_control key must be "nav_view" (the canonical state)."""
+        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and _attribute_name(node.func) == "st.segmented_control":
+                for kw in node.keywords:
+                    if kw.arg == "key" and isinstance(kw.value, ast.Constant):
+                        assert kw.value.value == "nav_view", (
+                            f"segmented_control key must be 'nav_view', got {kw.value.value!r}"
+                        )
+
+    def test_switch_nav_view_helper_exists(self):
+        """A canonical _switch_nav_view helper must exist."""
+        tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+        funcs = {
+            node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        }
+        assert "_switch_nav_view" in funcs
+
+    def test_videos_empty_cta_uses_switch_nav_view(self):
+        """The Videos empty-state CTA must use _switch_nav_view, not raw
+        session_state assignment + rerun."""
+        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        func = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_render_videos_view"
+        )
+        func_source = ast.get_source_segment(source, func)
+        assert "_switch_nav_view" in func_source
+        # Must NOT have the old anti-pattern
+        assert 'st.session_state["nav_view"] = "create"' not in func_source
+
+    def test_top_bar_uses_switch_nav_view(self):
+        """_render_top_bar must dispatch navigation via _switch_nav_view."""
+        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        func = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_render_top_bar"
+        )
+        func_source = ast.get_source_segment(source, func)
+        assert "_switch_nav_view" in func_source
+
+
+# ---------------------------------------------------------------------------
 # _task_file_to_uri
 # ---------------------------------------------------------------------------
 
