@@ -6078,45 +6078,65 @@ def _render_videos_view():
 def _render_video_card(task):
     """渲染单个视频卡片，包含缩略图、元数据和操作控件。"""
     task_id = task.get("task_id", "")
-    videos = task.get("videos") or []
-    thumbnails = task.get("thumbnails") or []
+    video_file = task.get("video_file", "")
 
     with st.container(key=f"vid_card_{task_id}"):
-        for i, video_url in enumerate(videos):
-            cols = st.columns([1, 2])
-            with cols[0]:
-                if i < len(thumbnails) and thumbnails[i]:
-                    try:
-                        st.image(thumbnails[i], use_container_width=True)
-                    except Exception:
-                        st.markdown(
-                            '<div style="background:#1a1a24;border-radius:8px;'
-                            'height:120px;display:flex;align-items:center;'
-                            'justify-content:center;color:#64748b;">🎬</div>',
-                            unsafe_allow_html=True,
-                        )
-                else:
-                    st.markdown(
-                        '<div style="background:#1a1a24;border-radius:8px;'
-                        'height:120px;display:flex;align-items:center;'
-                        'justify-content:center;color:#64748b;">🎬</div>',
-                        unsafe_allow_html=True,
+        cols = st.columns([1, 2])
+        with cols[0]:
+            # 尝试查找缩略图
+            thumbnail_path = _find_task_thumbnail(task)
+            if thumbnail_path:
+                try:
+                    st.image(thumbnail_path, use_container_width=True)
+                except Exception:
+                    _render_video_placeholder()
+            else:
+                _render_video_placeholder()
+        with cols[1]:
+            st.write(f"**{task.get('subject', task_id)}**")
+            if task.get("video_source"):
+                st.caption(tr("Video Source Label").format(source=task["video_source"]))
+            elif task.get("source"):
+                st.caption(tr("Video Source Label").format(source=task["source"]))
+            updated = task.get("updated_at", "")
+            if updated:
+                st.caption(str(updated)[:19])
+            elif task.get("mtime"):
+                from datetime import datetime
+                st.caption(datetime.fromtimestamp(task["mtime"]).strftime("%Y-%m-%d %H:%M"))
+            if video_file and os.path.isfile(video_file):
+                with open(video_file, "rb") as f:
+                    st.download_button(
+                        tr("Download Video"),
+                        data=f,
+                        file_name=_build_video_download_name(task.get("subject"), 1, 1),
+                        key=f"vid_dl_{task_id}",
                     )
-            with cols[1]:
-                st.write(f"**{task.get('video_subject', task_id)}**")
-                if task.get("video_source"):
-                    st.caption(tr("Video Source Label").format(source=task["video_source"]))
-                updated = task.get("updated_at", "")
-                if updated:
-                    st.caption(updated[:19])
-                if video_url and os.path.isfile(video_url):
-                    with open(video_url, "rb") as f:
-                        st.download_button(
-                            tr("Download Video"),
-                            data=f,
-                            file_name=_build_video_download_name(task.get("video_subject"), i + 1, len(videos)),
-                            key=f"vid_dl_{task_id}_{i}",
-                        )
+
+
+def _find_task_thumbnail(task):
+    """查找任务的缩略图路径。"""
+    task_id = task.get("task_id", "")
+    if not task_id:
+        return None
+    task_dir = os.path.join(utils.task_dir(), task_id)
+    if not os.path.isdir(task_dir):
+        return None
+    # 查找 thumbnail-1.jpg
+    thumb_path = os.path.join(task_dir, "thumbnail-1.jpg")
+    if os.path.isfile(thumb_path):
+        return thumb_path
+    return None
+
+
+def _render_video_placeholder():
+    """渲染视频占位符。"""
+    st.markdown(
+        '<div style="background:#1a1a24;border-radius:8px;'
+        'height:120px;display:flex;align-items:center;'
+        'justify-content:center;color:#64748b;font-size:2rem;">🎬</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _render_jobs_view():
@@ -6184,9 +6204,11 @@ def _render_job_card(task):
     with st.container(key=f"job_card_{task_id}"):
         cols = st.columns([3, 1, 1, 1])
         with cols[0]:
-            st.write(f"**{task.get('video_subject', task_id)}**")
+            st.write(f"**{task.get('subject', task_id)}**")
             if task.get("video_source"):
                 st.caption(tr("Video Source Label").format(source=task["video_source"]))
+            elif task.get("source"):
+                st.caption(tr("Video Source Label").format(source=task["source"]))
         with cols[1]:
             st.markdown(f'<span class="{status_class}">{status_label}</span>', unsafe_allow_html=True)
         with cols[2]:
@@ -6198,9 +6220,9 @@ def _render_job_card(task):
                 st.caption(f"{progress}%")
         with cols[3]:
             if state == const.TASK_STATE_COMPLETE:
-                videos = task.get("videos") or []
-                if videos and os.path.isfile(videos[0]):
-                    with open(videos[0], "rb") as f:
+                video_file = task.get("video_file", "")
+                if video_file and os.path.isfile(video_file):
+                    with open(video_file, "rb") as f:
                         st.download_button(
                             "▶",
                             data=f,
