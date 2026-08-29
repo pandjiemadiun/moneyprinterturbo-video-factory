@@ -67,6 +67,16 @@ def _run_generation(
     log_handler_id = None
     worker_thread_id = threading.get_ident()
     try:
+        # Check if task was cancelled before starting
+        from app.controllers.manager.memory_manager import _task_manager
+        if _task_manager.is_cancelled(task_id):
+            logger.info(f"task cancelled before execution: {task_id}")
+            sm.state.update_task(task_id, state=const.TASK_STATE_CANCELLED)
+            return {"task_id": task_id, "state": const.TASK_STATE_CANCELLED}
+
+        # Transition from QUEUED to PROCESSING immediately before execution
+        sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
+
         if capture_logs:
             log_handler_id = logger.add(
                 lambda message: _append_task_log(task_id, str(message)),
@@ -141,7 +151,7 @@ def submit_generation(
     loomloom_request_snapshot = loomloom_video_request
     sm.state.update_task(
         task_id,
-        state=const.TASK_STATE_PROCESSING,
+        state=const.TASK_STATE_QUEUED,
         progress=0,
         video_subject=task_params.video_subject or task_params.video_script or task_id,
     )

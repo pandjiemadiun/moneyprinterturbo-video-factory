@@ -15,6 +15,7 @@ class TaskManager:
         self.current_tasks = 0
         self.lock = threading.Lock()
         self.queue = self.create_queue()
+        self._cancelled_ids: set = set()
 
     def create_queue(self):
         raise NotImplementedError()
@@ -58,10 +59,29 @@ class TaskManager:
         thread.start()
 
     def run_task(self, func: Callable, *args: Any, **kwargs: Any):
+        # Check if this task has been cancelled before executing
+        task_id = kwargs.get("task_id")
+        if task_id and task_id in self._cancelled_ids:
+            logger.info(f"skip cancelled task: {task_id}")
+            self._cancelled_ids.discard(task_id)
+            return
         try:
             func(*args, **kwargs)  # call the function here, passing *args and **kwargs.
         finally:
             self.task_done()
+
+    def cancel(self, task_id: str) -> bool:
+        """Cancel a queued task. Returns True if task was found and cancelled."""
+        with self.lock:
+            if task_id in self._cancelled_ids:
+                return True
+            self._cancelled_ids.add(task_id)
+            logger.info(f"task cancelled: {task_id}")
+            return True
+
+    def is_cancelled(self, task_id: str) -> bool:
+        """Check if a task has been cancelled."""
+        return task_id in self._cancelled_ids
 
     def check_queue(self):
         with self.lock:

@@ -89,12 +89,8 @@ def get_task_ids_by_status(status: str, max_tasks: int = 1000) -> list[str]:
             if task_state == const.TASK_STATE_PROCESSING:
                 result.append(task_id)
         elif status == "queued":
-            # Queued = not complete/failed/processing
-            if task_state not in [
-                const.TASK_STATE_COMPLETE,
-                const.TASK_STATE_FAILED,
-                const.TASK_STATE_PROCESSING,
-            ]:
+            # Exact match: only QUEUED state
+            if task_state == const.TASK_STATE_QUEUED:
                 result.append(task_id)
         elif status == "cancelled":
             if task_state == const.TASK_STATE_CANCELLED:
