@@ -536,3 +536,35 @@ async def download_video(request: Request, file_path: str):
         filename=f"{filename}{extension}",
         media_type=f"video/{extension[1:]}",
     )
+
+
+@router.post("/tasks/{task_id}/cancel", summary="Cancel a queued task")
+def cancel_task(request: Request, task_id: str):
+    """Cancel a queued task."""
+    from app.services import task_cleanup
+
+    request_id = base.get_task_id(request)
+    result = task_cleanup.cancel_task(task_id)
+    if not result["success"]:
+        raise HttpException(
+            task_id=request_id,
+            status_code=409,
+            message=result["message"],
+        )
+    return utils.get_response(200, {"status": "cancelled", "task_id": task_id})
+
+
+@router.post("/tasks/{task_id}/retry", summary="Retry a failed task")
+def retry_task(request: Request, task_id: str):
+    """Retry a failed or cancelled task."""
+    from app.services import task_cleanup
+
+    request_id = base.get_task_id(request)
+    result = task_cleanup.retry_task(task_id)
+    if not result["success"]:
+        raise HttpException(
+            task_id=request_id,
+            status_code=409,
+            message=result["message"],
+        )
+    return utils.get_response(200, {"status": "retried", "task_id": task_id, "new_task_id": result.get("new_task_id", "")})
