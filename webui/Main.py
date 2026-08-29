@@ -6055,7 +6055,18 @@ def _render_videos_view():
     completed_tasks = [t for t in tasks if t.get("state") == const.TASK_STATE_COMPLETE]
 
     if not completed_tasks:
-        st.info(tr("Videos Empty"))
+        with st.container():
+            st.markdown(
+                '<div class="empty-state">'
+                '<div class="empty-state-icon">🎬</div>'
+                '<h3>' + tr("Videos Empty Title") + '</h3>'
+                '<p>' + tr("Videos Empty Desc") + '</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(tr("Videos Empty CTA"), key="videos_empty_create"):
+                st.session_state["nav_view"] = "create"
+                st.rerun()
         return
 
     st.caption(tr("Videos Count").format(count=len(completed_tasks)))
@@ -6070,7 +6081,7 @@ def _render_video_card(task):
     videos = task.get("videos") or []
     thumbnails = task.get("thumbnails") or []
 
-    with st.container(border=True):
+    with st.container(key=f"vid_card_{task_id}"):
         for i, video_url in enumerate(videos):
             cols = st.columns([1, 2])
             with cols[0]:
@@ -6078,7 +6089,19 @@ def _render_video_card(task):
                     try:
                         st.image(thumbnails[i], use_container_width=True)
                     except Exception:
-                        pass
+                        st.markdown(
+                            '<div style="background:#1a1a24;border-radius:8px;'
+                            'height:120px;display:flex;align-items:center;'
+                            'justify-content:center;color:#64748b;">🎬</div>',
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.markdown(
+                        '<div style="background:#1a1a24;border-radius:8px;'
+                        'height:120px;display:flex;align-items:center;'
+                        'justify-content:center;color:#64748b;">🎬</div>',
+                        unsafe_allow_html=True,
+                    )
             with cols[1]:
                 st.write(f"**{task.get('video_subject', task_id)}**")
                 if task.get("video_source"):
@@ -6099,7 +6122,98 @@ def _render_video_card(task):
 def _render_jobs_view():
     """渲染任务管理视图，展示所有任务的状态和进度。"""
     st.write(tr("Jobs Title"))
-    st.info(tr("Jobs View Info"))
+
+    tasks = _collect_task_summaries()
+
+    if not tasks:
+        with st.container():
+            st.markdown(
+                '<div class="empty-state">'
+                '<div class="empty-state-icon">📋</div>'
+                '<h3>' + tr("Jobs Empty Title") + '</h3>'
+                '<p>' + tr("Jobs Empty Desc") + '</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        return
+
+    # 统计
+    queued = sum(1 for t in tasks if t.get("state") not in [const.TASK_STATE_COMPLETE, const.TASK_STATE_FAILED, -1, 1])
+    processing = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_PROCESSING)
+    completed = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_COMPLETE)
+    failed = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_FAILED)
+
+    # 状态摘要
+    summary_cols = st.columns(4)
+    with summary_cols[0]:
+        st.metric(tr("Jobs Metric Queued"), queued)
+    with summary_cols[1]:
+        st.metric(tr("Jobs Metric Processing"), processing)
+    with summary_cols[2]:
+        st.metric(tr("Jobs Metric Completed"), completed)
+    with summary_cols[3]:
+        st.metric(tr("Jobs Metric Failed"), failed)
+
+    st.divider()
+
+    # 任务列表
+    for task in tasks:
+        _render_job_card(task)
+
+
+def _render_job_card(task):
+    """渲染单个任务卡片，包含状态、进度和操作控件。"""
+    task_id = task.get("task_id", "")
+    state = task.get("state")
+    progress = task.get("progress", 0)
+
+    # 状态样式
+    if state == const.TASK_STATE_COMPLETE:
+        status_class = "status-complete"
+        status_label = tr("Job Status Complete")
+    elif state == const.TASK_STATE_PROCESSING:
+        status_class = "status-processing"
+        status_label = tr("Job Status Processing")
+    elif state == const.TASK_STATE_FAILED:
+        status_class = "status-failed"
+        status_label = tr("Job Status Failed")
+    else:
+        status_class = "status-queued"
+        status_label = tr("Job Status Queued")
+
+    with st.container(key=f"job_card_{task_id}"):
+        cols = st.columns([3, 1, 1, 1])
+        with cols[0]:
+            st.write(f"**{task.get('video_subject', task_id)}**")
+            if task.get("video_source"):
+                st.caption(tr("Video Source Label").format(source=task["video_source"]))
+        with cols[1]:
+            st.markdown(f'<span class="{status_class}">{status_label}</span>', unsafe_allow_html=True)
+        with cols[2]:
+            if state == const.TASK_STATE_PROCESSING:
+                st.progress(progress / 100.0, text=f"{progress}%")
+            elif state == const.TASK_STATE_COMPLETE:
+                st.progress(1.0, text="100%")
+            else:
+                st.caption(f"{progress}%")
+        with cols[3]:
+            if state == const.TASK_STATE_COMPLETE:
+                videos = task.get("videos") or []
+                if videos and os.path.isfile(videos[0]):
+                    with open(videos[0], "rb") as f:
+                        st.download_button(
+                            "▶",
+                            data=f,
+                            file_name=f"video_{task_id}.mp4",
+                            key=f"job_play_{task_id}",
+                        )
+            elif state == const.TASK_STATE_FAILED:
+                error = task.get("error", "")
+                if error:
+                    st.caption(error[:50] + "..." if len(error) > 50 else error)
+
+        if task.get("failed_stage"):
+            st.caption(tr("Job Failed Stage").format(stage=task["failed_stage"]))
 
 
 _render_application()
