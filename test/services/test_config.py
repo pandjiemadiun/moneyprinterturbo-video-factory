@@ -188,15 +188,15 @@ class TestConfigPersistence:
             config._cfg.clear()
             config._cfg.update(original_cfg)
 
-    def test_save_config_does_not_hide_other_replace_errors(self):
-        """非 EBUSY 错误必须继续抛出，不能把权限或磁盘故障伪装成保存成功。"""
+    def test_save_config_handles_read_only_replace_gracefully(self):
+        """只读文件系统的 EACCES/EROFS 不应崩溃，应保留内存配置并记录告警。"""
         original_cfg = dict(config._cfg)
         original_app = dict(config.app)
         try:
             with TemporaryDirectory() as temp_dir:
                 config_path = Path(temp_dir) / "config.toml"
                 config_path.write_text("[app]\nold_value = true\n", encoding="utf-8")
-                config.app["replace_error_test"] = "not-saved"
+                config.app["readonly_replace_test"] = "kept-in-memory"
 
                 with (
                     patch.object(config, "root_dir", temp_dir),
@@ -204,24 +204,65 @@ class TestConfigPersistence:
                     patch.object(
                         config.os,
                         "replace",
-                        side_effect=OSError(errno.EACCES, "Permission denied"),
+                        side_effect=OSError(errno.EROFS, "Read-only file system"),
                     ),
+                    patch.object(config.logger, "warning") as warning_mock,
                 ):
-                    try:
-                        config.save_config()
-                    except OSError as exc:
-                        assert exc.errno == errno.EACCES
-                    else:
-                        raise AssertionError("expected config save to fail")
+                    config.save_config()
 
+                assert config.app["readonly_replace_test"] == "kept-in-memory"
                 saved_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
                 assert saved_config["app"]["old_value"] is True
                 assert list(Path(temp_dir).glob(".config-*.toml.tmp")) == []
+                assert config.get_last_save_error() is not None
+                warning_mock.assert_called_once()
         finally:
             config.app.clear()
             config.app.update(original_app)
             config._cfg.clear()
             config._cfg.update(original_cfg)
+            config.clear_last_save_error()
+
+    def test_save_config_handles_read_only_inplace_write_gracefully(self):
+        """原地写入时遇到只读文件系统也不应崩溃。"""
+        original_cfg = dict(config._cfg)
+        original_app = dict(config.app)
+        try:
+            with TemporaryDirectory() as temp_dir:
+                config_path = Path(temp_dir) / "config.toml"
+                config_path.write_text("[app]\nold_value = true\n", encoding="utf-8")
+                config.app["readonly_inplace_test"] = "kept-in-memory"
+
+                with (
+                    patch.object(config, "root_dir", temp_dir),
+                    patch.object(config, "config_file", str(config_path)),
+                    patch.object(
+                        config.os,
+                        "replace",
+                        side_effect=OSError(errno.EBUSY, "Device or resource busy"),
+                    ),
+                    patch(
+                        "builtins.open",
+                        side_effect=OSError(errno.EROFS, "Read-only file system"),
+                    ),
+                    patch.object(config.logger, "warning") as warning_mock,
+                ):
+                    config.save_config()
+
+                assert config.app["readonly_inplace_test"] == "kept-in-memory"
+                saved_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+                assert saved_config["app"]["old_value"] is True
+                assert config.get_last_save_error() is not None
+                assert any(
+                    "not writable" in str(call)
+                    for call in warning_mock.call_args_list
+                )
+        finally:
+            config.app.clear()
+            config.app.update(original_app)
+            config._cfg.clear()
+            config._cfg.update(original_cfg)
+            config.clear_last_save_error()
 
     def test_runtime_config_lock_blocks_concurrent_config_writes(self):
         """长任务持有运行锁时，其它会话不能在任务中途改写全局配置。"""

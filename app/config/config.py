@@ -24,6 +24,18 @@ _pending_config_flush_scheduled = False
 _MISSING = object()
 _DELETE = object()
 _UTF8_BOM = "\ufeff"
+_last_save_error = None
+
+
+def get_last_save_error() -> str | None:
+    """Return the most recent config persistence error, if any."""
+    return _last_save_error
+
+
+def clear_last_save_error() -> None:
+    """Clear the persisted config error after the UI has acknowledged it."""
+    global _last_save_error
+    _last_save_error = None
 
 
 class _SynchronizedConfig(dict):
@@ -486,9 +498,14 @@ def save_config():
     该场景下只能在锁内原地覆盖文件；其它异常仍然抛出，避免掩盖权限、磁盘
     或路径错误。
 
+    当配置文件所在文件系统为只读时（例如生产环境以只读方式 bind-mount
+    config.toml），静记告警并继续使用内存中的配置值，不向调用方抛出异常。
+
     这仍然保留项目现有的单用户全局配置语义，不额外引入复杂的多用户配置系统；
     主要用于避免多标签页或快速 rerun 时损坏配置文件。
     """
+    global _last_save_error
+
     with _config_save_lock:
         config_to_save = dict(_cfg)
         config_to_save["app"] = dict(app)
@@ -526,8 +543,23 @@ def save_config():
             try:
                 os.replace(temp_path, config_file)
             except OSError as exc:
-                if exc.errno != errno.EBUSY:
+                if exc.errno not in (errno.EBUSY, errno.EROFS, errno.EACCES):
                     raise
+
+                if exc.errno == errno.EROFS or exc.errno == errno.EACCES:
+                    logger.warning(
+                        "config.toml is on a read-only filesystem or not writable: "
+                        f"{config_file}. Settings will use in-memory values only "
+                        "for this session."
+                    )
+                    _last_save_error = (
+                        "Settings cannot be saved to config.toml "
+                        "(read-only file system). "
+                        "Changes will persist for this session only."
+                    )
+                    _cfg.clear()
+                    _cfg.update(config_to_save)
+                    return
 
                 logger.warning(
                     "atomic config replacement is unavailable for the mounted "
@@ -539,6 +571,22 @@ def save_config():
                     os.fsync(f.fileno())
             _cfg.clear()
             _cfg.update(config_to_save)
+        except OSError as exc:
+            if exc.errno in (errno.EROFS, errno.EACCES):
+                logger.warning(
+                    "config.toml is not writable: "
+                    f"{config_file} ({exc}). "
+                    "Settings will use in-memory values only for this session."
+                )
+                _last_save_error = (
+                    "Settings cannot be saved to config.toml "
+                    "(read-only file system). "
+                    "Changes will persist for this session only."
+                )
+                _cfg.clear()
+                _cfg.update(config_to_save)
+                return
+            raise
         finally:
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)

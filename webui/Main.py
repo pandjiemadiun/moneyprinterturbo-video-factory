@@ -228,6 +228,11 @@ def _save_runtime_config():
     saved = config.try_save_config()
     if not saved:
         logger.debug("deferred WebUI config save until active task completes")
+    save_error = config.get_last_save_error()
+    if save_error and not st.session_state.get("_config_persistence_warning_shown"):
+        st.warning(save_error)
+        st.session_state["_config_persistence_warning_shown"] = True
+        config.clear_last_save_error()
     return saved
 
 
@@ -3698,7 +3703,7 @@ def _render_batch_mode_toggle(params):
                     key=f"batch_topic_subject_{i}",
                 )
                 batch_topics[i]["video_count"] = st.number_input(
-                    tr("Batch Topic Count"),
+                    tr("Batch Video Count"),
                     min_value=1,
                     max_value=5,
                     value=batch_topics[i].get("video_count", 1),
