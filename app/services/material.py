@@ -8,7 +8,7 @@ import time
 import asyncio
 from pathlib import Path
 from typing import Any, Callable, List, Optional
-from urllib.parse import quote_plus, urlencode, urlparse, urlunsplit, parse_qs
+from urllib.parse import quote_plus, urlencode, urlparse, urlunsplit, parse_qs, urlsplit
 
 import requests
 from loguru import logger
