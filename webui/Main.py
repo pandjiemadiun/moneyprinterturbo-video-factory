@@ -17,7 +17,8 @@ from uuid import UUID, uuid4
 import requests
 import streamlit as st
 from loguru import logger
-from streamlit_tour import Tour
+# streamlit_tour removed - incompatible with Streamlit 1.59.1
+# from streamlit_tour import Tour
 
 # WebUI 作为独立入口运行时，需要让项目根目录优先于第三方依赖，
 # 避免依赖中的同名 app 包遮蔽 MoneyPrinterTurbo 自己的 app 包。
@@ -1578,63 +1579,9 @@ def tr_optional(key, fallback_language=""):
 
 
 def render_onboarding_tour():
-    # 引导只覆盖三个稳定入口，不尝试控制 Dialog、Tabs 或业务表单。这样既能让
-    # 新用户理解完整流程，也不会把引导状态与 Streamlit 的动态组件生命周期耦合。
-    steps = [
-        Tour.bind(
-            "open_settings_dialog_button",
-            title=tr("Onboarding Model Settings Title"),
-            desc=tr("Onboarding Model Settings Description"),
-            side="bottom",
-            align="end",
-        ),
-        Tour.bind(
-            "main_settings_grid",
-            title=tr("Onboarding Creation Settings Title"),
-            desc=tr("Onboarding Creation Settings Description"),
-            side="top",
-            align="center",
-        ),
-        Tour.bind(
-            "generate_video_button",
-            title=tr("Onboarding Generate Video Title"),
-            desc=tr("Onboarding Generate Video Description"),
-            side="top",
-            align="center",
-        ),
-    ]
-
-    # streamlit-tour 1.1.0 没有在 Python 构造参数中暴露导航文案，但底层
-    # Driver.js 支持在每一步的 popover 配置中覆盖按钮文本。这里统一注入本地化
-    # 文案，并对内容做 HTML 转义，因为组件会通过 innerHTML 渲染这些字段。
-    previous_text = html.escape(tr("Onboarding Previous"))
-    next_text = html.escape(tr("Onboarding Next"))
-    done_text = html.escape(tr("Onboarding Done"))
-    for index, step in enumerate(steps):
-        step.popover["prevBtnText"] = f"&larr; {previous_text}"
-        # Driver.js 会在合并单步配置时覆盖已经替换过变量的进度模板，因此直接
-        # 写入当前步骤和总步骤数，避免页面显示未解析的 {{current}} 占位符。
-        step.popover["progressText"] = f"{index + 1} / {len(steps)}"
-        if index == len(steps) - 1:
-            step.popover["doneBtnText"] = done_text
-        else:
-            step.popover["nextBtnText"] = f"{next_text} &rarr;"
-
-    tour = Tour(
-        steps=steps,
-        key=ONBOARDING_TOUR_KEY,
-        show_progress=True,
-        animate=True,
-        overlay_opacity=0.55,
-        one_time_tour=True,
-    )
-
-    # 每个 Streamlit 会话只主动启动一次。是否已经完成则由组件通过浏览器
-    # localStorage 判断，避免页面 rerun 或普通控件交互反复弹出引导。
-    auto_start_key = f"{ONBOARDING_TOUR_KEY}-auto-started"
-    if not st.session_state.get(auto_start_key, False):
-        st.session_state[auto_start_key] = True
-        tour.start()
+    # streamlit_tour removed - incompatible with Streamlit 1.59.1
+    # Onboarding tour disabled
+    return
 
 
 def _youtube_error_message(error: str, failed_stage: str | None) -> str:
@@ -6068,23 +6015,30 @@ def _render_videos_view():
 
 
 def _render_video_card(task):
-    """渲染单个视频卡片，包含缩略图、元数据和操作控件。"""
+    """Render a single video card with video-first layout.
+
+    Layout (mobile-first):
+        [VIDEO PLAYER]
+        Title
+        Source · Date
+        [Download] [Delete]
+    """
     task_id = task.get("task_id", "")
     video_file = task.get("video_file", "")
 
     with st.container(key=f"vid_card_{task_id}"):
-        cols = st.columns([1, 2])
-        with cols[0]:
-            # 尝试查找缩略图
-            thumbnail_path = _find_task_thumbnail(task)
-            if thumbnail_path:
-                try:
-                    st.image(thumbnail_path, use_container_width=True)
-                except Exception:
-                    _render_video_placeholder()
-            else:
-                _render_video_placeholder()
-        with cols[1]:
+        # Video player as primary content
+        if video_file and os.path.isfile(video_file):
+            filename = os.path.basename(video_file)
+            download_url = f"/api/v1/download/{task_id}/{filename}"
+
+            # Use full URL for API stream endpoint (required by st.video)
+            stream_url = f"https://goldtrader.website/api/v1/stream/{task_id}/{filename}"
+
+            # Video player
+            st.video(stream_url, format="video/mp4")
+
+            # Title and metadata below player
             st.write(f"**{task.get('subject', task_id)}**")
             if task.get("video_source"):
                 st.caption(tr("Video Source Label").format(source=task["video_source"]))
@@ -6096,15 +6050,24 @@ def _render_video_card(task):
             elif task.get("mtime"):
                 from datetime import datetime
                 st.caption(datetime.fromtimestamp(task["mtime"]).strftime("%Y-%m-%d %H:%M"))
-            if video_file and os.path.isfile(video_file):
-                filename = os.path.basename(video_file)
-                download_url = f"/api/v1/download/{task_id}/{filename}"
+
+            # Action buttons row
+            action_cols = st.columns(2)
+            with action_cols[0]:
                 st.link_button(
-                    tr("Download Video"),
+                    tr("Download"),
                     url=download_url,
                     key=f"vid_dl_{task_id}",
                     help=tr("Download Video"),
                 )
+            with action_cols[1]:
+                if st.button(
+                    tr("Delete"),
+                    key=f"vid_del_{task_id}",
+                    help=tr("Delete Video"),
+                    type="secondary",
+                ):
+                    st.session_state["delete_confirm_task"] = task_id
 
 
 def _find_task_thumbnail(task):

@@ -29,7 +29,7 @@ RUN set -u; \
     }; \
     install_system_dependencies() { \
         apt-get update && \
-        apt-get install -y --no-install-recommends git ffmpeg nodejs npm chromium; \
+        apt-get install -y --no-install-recommends curl unzip git ffmpeg nodejs npm chromium; \
     }; \
     retry_system_dependencies() { \
         attempt=1; \
