@@ -570,7 +570,12 @@ def search_videos_coverr(
         video_items: List[MaterialInfo] = []
 
         if not isinstance(response, dict) or "hits" not in response:
-            logger.error("coverr video search returned an unsupported response")
+            # Log actual response structure for diagnosis (redact sensitive fields)
+            safe_keys = list(response.keys()) if isinstance(response, dict) else type(response).__name__
+            logger.error(
+                f"coverr video search returned an unsupported response. "
+                f"status={r.status_code}, keys={safe_keys}"
+            )
             return video_items
 
         for v in response["hits"]:
@@ -1845,12 +1850,15 @@ def rank_videos(
     Returns candidates sorted by descending score.
     """
     scored: list[tuple[float, MaterialInfo]] = []
+    rejected_duration = 0
+    rejected_resolution = 0
     for item in items:
         info = item.source_info or {}
         dur = item.duration or 0
 
         # Filter: duration
         if dur < minimum_duration:
+            rejected_duration += 1
             continue
 
         # Filter: known-bad resolution (skip tiny clips)
@@ -1859,10 +1867,17 @@ def rank_videos(
         h = rendition.get("height", 0) or 0
         if w > 0 and h > 0:
             if w < _MATERIAL_MIN_WIDTH or h < _MATERIAL_MIN_HEIGHT:
+                rejected_resolution += 1
                 continue
 
         score = _score_candidate(item, search_term, minimum_duration, video_aspect)
         scored.append((score, item))
+
+    if not scored and items:
+        logger.debug(
+            f"rank_videos: all {items} candidates rejected. "
+            f"duration={rejected_duration}, resolution={rejected_resolution}"
+        )
 
     scored.sort(key=lambda pair: pair[0], reverse=True)
     return [item for _, item in scored]
@@ -2489,7 +2504,7 @@ def _download_videos_by_script_order(
                     f"asset_id={source_info.get('asset_id') or 'unknown'}"
                 )
                 saved_video_path = _download_material_item(
-                    item, provider, material_directory
+                    item, item.provider, material_directory
                 )
                 if saved_video_path:
                     logger.info(f"video saved: {saved_video_path}")
