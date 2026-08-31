@@ -445,11 +445,63 @@ def _normalize_material_orientation(
     """
     if video_aspect != VideoAspect.portrait:
         return video_path
-    return normalize_material_to_portrait(
-        video_path,
-        video_aspect.to_resolution()[0],
-        video_aspect.to_resolution()[1],
-    ) or video_path
+    target_w, target_h = video_aspect.to_resolution()
+    reframed = _normalize_material_to_portrait(video_path, target_w, target_h)
+    return reframed if reframed else video_path
+
+
+def _normalize_material_to_portrait(
+    video_path: str,
+    target_width: int,
+    target_height: int,
+) -> Optional[str]:
+    """
+    Normalize a landscape material to portrait orientation.
+
+    Returns the path to the reframed video, or None if reframing fails.
+    """
+    if not os.path.exists(video_path):
+        return None
+
+    # Check current orientation
+    try:
+        import subprocess
+        probe_cmd = [
+            utils.get_ffmpeg_binary().replace("ffmpeg", "ffprobe"),
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+            video_path,
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        if probe_result.returncode != 0:
+            return None
+
+        parts = probe_result.stdout.strip().split(",")
+        if len(parts) < 2:
+            return None
+
+        width = int(parts[0])
+        height = int(parts[1])
+
+        # Already portrait, no reframing needed
+        if height > width:
+            return video_path
+
+        # Check if reframing is possible
+        if not _can_reframe_to_portrait(width, height, target_width, target_height):
+            return None
+
+        # Reframe
+        output_path = video_path.replace(".mp4", "_portrait.mp4")
+        if _reframe_landscape_to_portrait(video_path, output_path, target_width, target_height):
+            return output_path
+
+    except Exception as exc:
+        logger.error(f"Material normalization error: {exc}")
+
+    return None
 
 
 def search_videos_pexels(
@@ -2460,7 +2512,7 @@ def download_videos_by_scene(
                 if video_aspect == VideoAspect.portrait:
                     aspect = VideoAspect(video_aspect)
                     target_w, target_h = aspect.to_resolution()
-                    reframed_path = normalize_material_to_portrait(
+                    reframed_path = _normalize_material_to_portrait(
                         scene_clip, target_w, target_h
                     )
                     if reframed_path and reframed_path != scene_clip:
