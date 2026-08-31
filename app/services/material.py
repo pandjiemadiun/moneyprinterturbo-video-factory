@@ -2291,7 +2291,7 @@ def download_videos(
                 f"asset_id={source_info.get('asset_id') or 'unknown'}"
             )
             saved_video_path = _download_material_item(
-                item, provider, material_directory
+                item, item.provider, material_directory
             )
             if saved_video_path:
                 logger.info(f"video saved: {saved_video_path}")
