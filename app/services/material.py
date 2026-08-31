@@ -316,82 +316,28 @@ def _reframe_landscape_to_portrait(
     Reframe a landscape video to portrait using crop + scale.
 
     Algorithm:
-        1. Scale the landscape source so it fully covers the portrait canvas
-           (scale to fit the portrait height, allowing horizontal overflow)
+        1. Scale the landscape source so its height matches target portrait height
+           (this causes horizontal overflow)
         2. Center-crop the excess horizontal area
         3. Never stretch or distort
 
     For a 1920x1080 landscape source → 1080x1920 portrait:
-        - Scale factor: target_height / source_height = 1920 / 1080 = 1.778
-        - Scaled dimensions: 3413x1920
-        - Crop center 1080x1920
+        - Scale: height 1080 → 1920, width scales proportionally
+        - Center crop: 1080x1920 from center
 
     Uses ffmpeg for hardware-accelerated processing when available.
     """
     try:
         import subprocess
 
-        # Calculate scale to cover portrait canvas
-        # We want the source to fully cover the target portrait dimensions
-        # Scale based on the dimension that needs to cover the most
-        probe_cmd = [
-            utils.get_ffmpeg_binary().replace("ffmpeg", "ffprobe"),
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,duration,r_frame_rate",
-            "-of", "csv=p=0",
-            input_path,
-        ]
-        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
-        if probe_result.returncode != 0:
-            logger.warning(f"ffprobe failed for {input_path}: {probe_result.stderr}")
-            return False
-
-        # Parse ffprobe output: width,height,duration,framerate
-        parts = probe_result.stdout.strip().split(",")
-        if len(parts) < 2:
-            return False
-
-        src_width = int(parts[0])
-        src_height = int(parts[1])
-
-        if src_width <= 0 or src_height <= 0:
-            return False
-
-        # Calculate scaling to cover portrait canvas
-        # Scale so that the smaller dimension fills the target
-        scale_w = target_width / src_height  # landscape height → portrait width
-        scale_h = target_height / src_width  # landscape width → portrait height
-
-        # Use the larger scale to ensure full coverage
-        scale = max(scale_w, scale_h)
-
-        scaled_w = int(src_height * scale)  # This becomes the width after rotation logic
-        scaled_h = int(src_width * scale)
-
-        # For landscape → portrait: we scale so source height covers target width
-        # and source width covers target height
-        # Then center crop
-
-        # Simpler approach: scale to fit target height, then center crop width
-        scale_factor = target_height / src_height
-        scaled_width = int(src_width * scale_factor)
-        scaled_height = target_height
-
-        # Ensure scaled width is at least target_width for cropping
-        if scaled_width < target_width:
-            scale_factor = target_width / src_width
-            scaled_width = target_width
-            scaled_height = int(src_height * scale_factor)
-
-        # Center crop
-        x_offset = (scaled_width - target_width) // 2
-        y_offset = (scaled_height - target_height) // 2
-
         ffmpeg_binary = utils.get_ffmpeg_binary()
+
+        # Scale so source height matches target portrait height
+        # Then center-crop to target portrait width
+        # Use -1 for width to maintain aspect ratio (ffmpeg will make it even)
         filter_str = (
-            f"scale={scaled_width}:{scaled_height}:flags=lanczos,"
-            f"crop={target_width}:{target_height}:{x_offset}:{y_offset},"
+            f"scale=-1:{target_height}:flags=lanczos,"
+            f"crop={target_width}:{target_height}:(in_w-{target_width})/2:0,"
             f"setsar=1"
         )
 
@@ -468,58 +414,27 @@ def _filter_materials_by_aspect(
     return reframeable_items
 
 
-def normalize_material_to_portrait(
+def _normalize_material_orientation(
     video_path: str,
-    target_width: int,
-    target_height: int,
-) -> Optional[str]:
+    video_aspect: VideoAspect,
+) -> str:
     """
-    Normalize a landscape material to portrait orientation.
+    Normalize material orientation for the target output aspect.
 
-    Returns the path to the reframed video, or None if reframing fails.
+    For portrait targets:
+        - Native portrait: return as-is
+        - Eligible landscape: reframe to portrait
+        - Insufficient resolution: return original (will be rejected by caller)
+
+    For landscape/square targets: return as-is (existing behavior).
     """
-    if not os.path.exists(video_path):
-        return None
-
-    # Check current orientation
-    try:
-        import subprocess
-        probe_cmd = [
-            utils.get_ffmpeg_binary().replace("ffmpeg", "ffprobe"),
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-of", "csv=p=0",
-            video_path,
-        ]
-        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
-        if probe_result.returncode != 0:
-            return None
-
-        parts = probe_result.stdout.strip().split(",")
-        if len(parts) < 2:
-            return None
-
-        width = int(parts[0])
-        height = int(parts[1])
-
-        # Already portrait, no reframing needed
-        if height > width:
-            return video_path
-
-        # Check if reframing is possible
-        if not _can_reframe_to_portrait(width, height, target_width, target_height):
-            return None
-
-        # Reframe
-        output_path = video_path.replace(".mp4", "_portrait.mp4")
-        if _reframe_landscape_to_portrait(video_path, output_path, target_width, target_height):
-            return output_path
-
-    except Exception as exc:
-        logger.error(f"Material normalization error: {exc}")
-
-    return None
+    if video_aspect != VideoAspect.portrait:
+        return video_path
+    return normalize_material_to_portrait(
+        video_path,
+        video_aspect.to_resolution()[0],
+        video_aspect.to_resolution()[1],
+    ) or video_path
 
 
 def search_videos_pexels(
@@ -2294,6 +2209,10 @@ def download_videos(
                 item, item.provider, material_directory
             )
             if saved_video_path:
+                # Normalize orientation for portrait targets
+                saved_video_path = _normalize_material_orientation(
+                    saved_video_path, video_aspect
+                )
                 logger.info(f"video saved: {saved_video_path}")
                 video_paths.append(saved_video_path)
                 try:
@@ -2734,6 +2653,10 @@ def _download_videos_by_script_order(
                     item, item.provider, material_directory
                 )
                 if saved_video_path:
+                    # Normalize orientation for portrait targets
+                    saved_video_path = _normalize_material_orientation(
+                        saved_video_path, video_aspect
+                    )
                     logger.info(f"video saved: {saved_video_path}")
                     video_paths.append(saved_video_path)
                     try:
