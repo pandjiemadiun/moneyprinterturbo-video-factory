@@ -50,6 +50,44 @@ async def application_lifespan(_: FastAPI):
 
     material_service.run_startup_cleanup()
 
+    # Recover persisted QUEUED tasks after API restart.
+    # SQLiteState persists task state, but InMemoryTaskManager does not.
+    # On startup, reload all state=QUEUED tasks into the worker queue
+    # so they can be processed without manual intervention.
+    from app.models import const as model_const
+    from app.models.schema import VideoParams
+    from app.controllers.v1.video import task_manager
+    from app.services import state as sm
+    from app.services.task import start as tm_start
+
+    try:
+        queued_tasks, total = sm.state.get_all_tasks(page=1, page_size=10000)
+        queued_tasks = [t for t in queued_tasks if t.get("state") == model_const.TASK_STATE_QUEUED]
+        logger.info(f"Recovering {len(queued_tasks)} queued tasks after API restart")
+
+        recovered = 0
+        failed = 0
+        for task in queued_tasks:
+            task_id = task.get("task_id")
+            try:
+                params_dict = task.get("params", {})
+                if not params_dict:
+                    logger.warning(f"Skipping recovery of task {task_id}: missing params")
+                    failed += 1
+                    continue
+
+                params = VideoParams(**params_dict)
+                task_manager.add_task(tm_start, task_id=task_id, params=params)
+                logger.info(f"Recovered queued task {task_id}")
+                recovered += 1
+            except Exception as exc:
+                logger.warning(f"Failed to recover queued task {task_id}: {exc}")
+                failed += 1
+
+        logger.info(f"Startup recovery complete: {recovered} recovered, {failed} failed")
+    except Exception as exc:
+        logger.error(f"Startup queue recovery failed: {exc}")
+
     try:
         yield
     finally:
