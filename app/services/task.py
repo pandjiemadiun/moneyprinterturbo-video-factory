@@ -799,8 +799,7 @@ def _record_loomloom_run_reference(
 
 def _persist_scene_timing(task_id: str, scene_spans: list[dict]) -> None:
     """Phase 7B: persist the scene->TTS-timing map to the task artifacts dir
-    (NOT to the Factory DB / quality-metric tables) so the
-    scene->asset->timeline invariant can be verified after the render.
+    so the scene->asset->timeline invariant can be verified after the render.
 
     This is pipeline timing data (the authoritative input to the no-loop
     concat), not a quality metric. Written best-effort (never blocks render)."""

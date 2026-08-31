@@ -7,7 +7,7 @@ Tests for:
   P1 — Safe orphan cache_videos sweeper (material.py)
 
 All tests use temporary directories and mocks.
-DO NOT touch production cache_videos/ or factory.db.
+DO NOT touch production cache_videos/.
 """
 
 import os

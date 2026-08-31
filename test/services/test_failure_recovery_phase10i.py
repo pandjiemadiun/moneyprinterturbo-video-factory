@@ -2,7 +2,7 @@
 Phase 10I — Failure & Recovery Audit test suite.
 
 All tests use ISOLATED temporary directories and SYNTHETIC fixtures.
-No production storage, factory.db, config.toml, or real YouTube downloads
+No production storage, config.toml, or real YouTube downloads
 are touched.
 
 Run from the repo root, e.g. inside the production container:
