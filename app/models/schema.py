@@ -553,3 +553,38 @@ class VideoMaterialUploadResponse(BaseResponse):
             },
         }
     )
+
+
+# ---------------------------
+# ----- CONTENT INTELLIGENCE -----
+# ---------------------------
+class ContentIntelligenceRequest(BaseModel):
+    """Request to run the Content Intelligence pipeline.
+
+    Accepts a list of text topics as raw signals. Each topic becomes
+    a normalized signal for trend detection.
+    """
+    topics: list[str] = Field(
+        default_factory=list,
+        description="List of topics/texts to analyze",
+    )
+    min_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum opportunity score threshold for hypothesis generation",
+    )
+
+
+class ContentIntelligenceResponseData(BaseModel):
+    """Response data from a Content Intelligence pipeline run."""
+    trends: list[dict] = Field(default_factory=list)
+    opportunities: list[dict] = Field(default_factory=list)
+    patterns: list[dict] = Field(default_factory=list)
+    hypotheses: list[dict] = Field(default_factory=list)
+    success: bool = True
+    errors: list[str] = Field(default_factory=list)
+
+
+class ContentIntelligenceResponse(BaseResponse):
+    data: ContentIntelligenceResponseData
