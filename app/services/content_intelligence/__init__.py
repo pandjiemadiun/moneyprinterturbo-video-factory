@@ -35,6 +35,17 @@ from app.services.content_intelligence.opportunity_miner import OpportunityMiner
 from app.services.content_intelligence.viral_analyzer import ViralAnalyzer
 from app.services.content_intelligence.scorer import OpportunityScorer
 from app.services.content_intelligence.hypothesis import HypothesisGenerator
+from app.services.content_intelligence.provider_base import (
+    ContentProvider,
+    ProviderCapability,
+    ProviderHealth,
+    ProviderStatus,
+    Freshness,
+)
+from app.services.content_intelligence.providers import (
+    ProviderRegistry,
+    create_provider_registry,
+)
 
 __all__ = [
     "RawSignal",
@@ -54,4 +65,11 @@ __all__ = [
     "ViralAnalyzer",
     "OpportunityScorer",
     "HypothesisGenerator",
+    "ContentProvider",
+    "ProviderCapability",
+    "ProviderHealth",
+    "ProviderStatus",
+    "Freshness",
+    "ProviderRegistry",
+    "create_provider_registry",
 ]

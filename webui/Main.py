@@ -1441,6 +1441,7 @@ def _render_top_bar():
                 "create": tr("Nav Create"),
                 "videos": tr("Nav Videos"),
                 "jobs": tr("Nav Jobs"),
+                "intelligence": tr("Nav Intelligence") if "Nav Intelligence" in tr.__self__ else "Intelligence",
             }
             current_nav = st.session_state.get("nav_view", "create")
             selected_nav = st.segmented_control(
@@ -5944,6 +5945,8 @@ def _render_application():
         _render_videos_view()
     elif nav_view == "jobs":
         _render_jobs_view()
+    elif nav_view == "intelligence":
+        _render_content_intelligence_view()
     else:
         _render_create_view()
 
@@ -6374,6 +6377,233 @@ def _render_job_card(task):
 
         if task.get("failed_stage"):
             st.caption(tr("Job Failed Stage").format(stage=task["failed_stage"]))
+
+
+def _render_content_intelligence_view():
+    """Render the Content Intelligence dashboard.
+
+    Provides real-time trend analysis, opportunity mining, and content hypotheses
+    from external data providers (Google News RSS, Hacker News).
+    """
+    st.write("Content Intelligence")
+
+    # Controls
+    with st.expander("⚙️ Analysis Controls", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            geo = st.selectbox(
+                "Geography",
+                options=["ID", "US", "GB", "AU", "MY", "SG"],
+                index=0,
+                key="ci_geo",
+            )
+        with col2:
+            language = st.selectbox(
+                "Language",
+                options=["id", "en"],
+                index=0,
+                key="ci_language",
+            )
+        with col3:
+            category = st.selectbox(
+                "Category",
+                options=["general", "technology", "business", "sports", "entertainment", "health", "science"],
+                index=0,
+                key="ci_category",
+            )
+
+        max_signals = st.slider(
+            "Max signals per provider",
+            min_value=5,
+            max_value=50,
+            value=15,
+            key="ci_max_signals",
+        )
+
+    # Action buttons
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🔄 Fetch Live Trends", key="ci_fetch_live", type="primary", use_container_width=True):
+            st.session_state["ci_fetch_live"] = True
+            st.session_state["ci_fetch_text"] = False
+    with col2:
+        if st.button("📝 Analyze Custom Topics", key="ci_fetch_text", use_container_width=True):
+            st.session_state["ci_fetch_text"] = True
+            st.session_state["ci_fetch_live"] = False
+    with col3:
+        if st.button("🔃 Refresh", key="ci_refresh", use_container_width=True):
+            st.session_state["ci_refresh"] = True
+
+    # Custom topics input
+    if st.session_state.get("ci_fetch_text"):
+        custom_topics = st.text_area(
+            "Enter topics (one per line)",
+            height=100,
+            key="ci_custom_topics",
+            placeholder="AI in healthcare\nClimate change\nProductivity hacks",
+        )
+        if st.button("Analyze Topics", key="ci_analyze_topics", type="primary"):
+            topics = [t.strip() for t in custom_topics.split("\n") if t.strip()]
+            if topics:
+                with st.spinner("Analyzing topics..."):
+                    result = webui_api_client.api_content_intelligence_analyze(
+                        topics=topics,
+                        use_providers=False,
+                        geo=geo,
+                        language=language,
+                        category=category,
+                    )
+                st.session_state["ci_result"] = result
+                st.session_state["ci_loading"] = False
+
+    # Fetch live data
+    if st.session_state.get("ci_fetch_live") or st.session_state.get("ci_refresh"):
+        with st.spinner("Fetching live data from providers..."):
+            result = webui_api_client.api_content_intelligence_analyze(
+                topics=[],
+                use_providers=True,
+                geo=geo,
+                language=language,
+                category=category,
+                max_signals_per_provider=max_signals,
+            )
+        st.session_state["ci_result"] = result
+        st.session_state["ci_fetch_live"] = False
+        st.session_state["ci_refresh"] = False
+        st.rerun()
+
+    # Display results
+    result = st.session_state.get("ci_result")
+    if result is None:
+        st.info("Click 'Fetch Live Trends' to get real-time data from external providers, or 'Analyze Custom Topics' to analyze your own topics.")
+        return
+
+    if not result.get("success", True):
+        st.error(f"Analysis failed: {result.get('message', 'Unknown error')}")
+        return
+
+    # Provider Health
+    provider_health = result.get("provider_health", {})
+    if provider_health:
+        st.subheader("Provider Status")
+        cols = st.columns(len(provider_health))
+        for i, (pid, health) in enumerate(provider_health.items()):
+            with cols[i]:
+                status = health.get("status", "unknown")
+                status_color = {
+                    "live": "🟢",
+                    "recent": "🟡",
+                    "stale": "🟠",
+                    "offline": "🔴",
+                    "disabled": "⚫",
+                    "unknown": "⚪",
+                }.get(status, "⚪")
+                st.metric(
+                    label=f"{status_color} {pid}",
+                    value=status.upper(),
+                    delta=f"Signals: {health.get('total_signals', 0)}",
+                )
+                if health.get("average_response_time_ms"):
+                    st.caption(f"Response: {health['average_response_time_ms']:.0f}ms")
+
+    # Data source summary
+    summary = result.get("data_source_summary", {})
+    if summary:
+        with st.expander("📊 Data Source Summary", expanded=False):
+            st.json(summary)
+
+    # Errors
+    errors = result.get("errors", [])
+    if errors:
+        for error in errors:
+            st.warning(f"⚠️ {error}")
+
+    # Trends
+    trends = result.get("trends", [])
+    if trends:
+        st.subheader(f"Trends ({len(trends)})")
+        for i, trend in enumerate(trends[:10]):
+            with st.container():
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.markdown(f"**{trend.get('topic', 'Unknown')}**")
+                with col2:
+                    classification = trend.get("data_source_classification", "UNKNOWN")
+                    st.caption(f"Source: {classification}")
+
+                # Metadata
+                meta_col1, meta_col2, meta_col3, meta_col4 = st.columns(4)
+                with meta_col1:
+                    st.caption(f"Strength: {trend.get('strength', 0):.2f}")
+                with meta_col2:
+                    st.caption(f"Freshness: {trend.get('freshness', 0):.2f}")
+                with meta_col3:
+                    sources = trend.get("sources", [])
+                    st.caption(f"Sources: {', '.join(sources)}")
+                with meta_col4:
+                    evidence = trend.get("evidence", [])
+                    if evidence and evidence[0].startswith("url="):
+                        url = evidence[0][4:]
+                        st.link_button("🔗 Source", url=url, help="Open original source")
+
+                # Evidence
+                if trend.get("evidence"):
+                    with st.expander("Evidence", expanded=False):
+                        for ev in trend.get("evidence", []):
+                            st.caption(ev)
+
+                st.divider()
+
+    # Opportunities
+    opportunities = result.get("opportunities", [])
+    if opportunities:
+        st.subheader(f"Opportunities ({len(opportunities)})")
+        for i, opp in enumerate(opportunities[:5]):
+            with st.container():
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.markdown(f"**{opp.get('topic', 'Unknown')}**")
+                with col2:
+                    score = opp.get("score_total", 0)
+                    st.caption(f"Score: {score:.2f}" if score else "Score: N/A")
+
+                st.caption(f"Angle: {opp.get('angle', 'N/A')}")
+                st.caption(f"Audience: {opp.get('audience', 'N/A')}")
+
+                if opp.get("score_explanation"):
+                    with st.expander("Score Explanation", expanded=False):
+                        st.caption(opp["score_explanation"])
+
+                st.divider()
+
+    # Hypotheses
+    hypotheses = result.get("hypotheses", [])
+    if hypotheses:
+        st.subheader(f"Content Hypotheses ({len(hypotheses)})")
+        for i, hyp in enumerate(hypotheses[:5]):
+            with st.container():
+                st.markdown(f"**{hyp.get('topic', 'Unknown')}**")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.caption(f"Hook: {hyp.get('proposed_hook', 'N/A')}")
+                with col2:
+                    st.caption(f"Promise: {hyp.get('content_promise', 'N/A')}")
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.caption(f"Format: {hyp.get('format', 'N/A')}")
+                with col2:
+                    st.caption(f"Confidence: {hyp.get('confidence', 0):.2f}")
+                with col3:
+                    keywords = hyp.get("keywords", [])
+                    st.caption(f"Keywords: {', '.join(keywords[:3])}")
+
+                st.divider()
+
+    # Empty state
+    if not trends and not opportunities and not hypotheses:
+        st.info("No results. Try adjusting the controls or fetching live data.")
 
 
 _render_application()

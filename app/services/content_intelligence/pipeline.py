@@ -9,6 +9,7 @@ Orchestrates the complete flow:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from loguru import logger
@@ -20,6 +21,11 @@ from app.services.content_intelligence.models import (
     Trend,
     TrendSource,
     ViralPattern,
+    _utcnow,
+)
+from app.services.content_intelligence.provider_base import (
+    ContentProvider,
+    ProviderHealth,
 )
 from app.services.content_intelligence.trend_radar import TrendRadar
 from app.services.content_intelligence.opportunity_miner import OpportunityMiner
@@ -40,6 +46,9 @@ class PipelineResult:
     hypotheses: list[ContentHypothesis] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     success: bool = True
+    provider_health: dict[str, ProviderHealth] = field(default_factory=dict)
+    total_raw_signals: int = 0
+    fetched_at: datetime = field(default_factory=_utcnow)
 
     @property
     def top_hypothesis(self) -> Optional[ContentHypothesis]:
@@ -68,12 +77,14 @@ class ContentIntelligencePipeline:
         scorer: Optional[OpportunityScorer] = None,
         hypothesis_generator: Optional[HypothesisGenerator] = None,
         llm_client=None,
+        provider_registry=None,
     ):
         """Initialize the pipeline with optional component overrides.
 
         If a component is not provided, a default is created. The
         ``llm_client`` is passed to components that can use it for
-        semantic enhancement.
+        semantic enhancement. The ``provider_registry`` enables real
+        external data fetching.
         """
         self._radar = trend_radar or TrendRadar()
         self._miner = opportunity_miner or OpportunityMiner(llm_client)
@@ -82,6 +93,7 @@ class ContentIntelligencePipeline:
         self._generator = hypothesis_generator or HypothesisGenerator(
             llm_client
         )
+        self._provider_registry = provider_registry
 
     def add_signal_provider(
         self, provider: Callable[[], list[RawSignal]]
@@ -92,17 +104,41 @@ class ContentIntelligencePipeline:
     def run(
         self,
         signals: Optional[list[RawSignal]] = None,
+        use_providers: bool = False,
+        geo: str = "ID",
+        language: str = "id",
+        category: str = "general",
+        max_signals_per_provider: int = 20,
     ) -> PipelineResult:
         """Run the complete pipeline.
 
-        If ``signals`` is provided, they are used as input. Otherwise,
-        the trend radar collects from registered providers.
+        If ``signals`` is provided, they are used as input.
+        If ``use_providers`` is True and a provider_registry is set,
+        fetches real data from external providers.
+        Otherwise, the trend radar collects from registered providers.
 
         Returns a ``PipelineResult`` with all intermediate and final outputs.
         """
         result = PipelineResult()
+        result.fetched_at = _utcnow()
         try:
-            trends = self._radar.detect_trends(signals)
+            if use_providers and self._provider_registry:
+                signals, health = self._provider_registry.fetch_all(
+                    geo=geo,
+                    language=language,
+                    category=category,
+                    max_signals_per_provider=max_signals_per_provider,
+                )
+                result.provider_health = health
+                result.total_raw_signals = len(signals)
+                if not signals:
+                    logger.info("pipeline: no signals from providers")
+                    result.errors.append("no_provider_signals")
+                    return result
+                trends = self._radar.detect_trends(signals)
+            else:
+                trends = self._radar.detect_trends(signals)
+
             result.trends = trends
             if not trends:
                 logger.info("pipeline: no trends detected")

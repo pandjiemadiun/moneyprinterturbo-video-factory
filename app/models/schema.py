@@ -563,16 +563,41 @@ class ContentIntelligenceRequest(BaseModel):
 
     Accepts a list of text topics as raw signals. Each topic becomes
     a normalized signal for trend detection.
+
+    When use_providers is True, fetches real data from external providers
+    instead of using user-provided topics.
     """
     topics: list[str] = Field(
         default_factory=list,
-        description="List of topics/texts to analyze",
+        description="List of topics/texts to analyze (used when use_providers=False)",
+    )
+    use_providers: bool = Field(
+        default=False,
+        description="When True, fetches real data from external providers",
+    )
+    geo: str = Field(
+        default="ID",
+        description="Geographic region (e.g., 'ID', 'US')",
+    )
+    language: str = Field(
+        default="id",
+        description="Language code (e.g., 'id', 'en')",
+    )
+    category: str = Field(
+        default="general",
+        description="Content category (e.g., 'general', 'technology', 'business')",
     )
     min_score: float = Field(
         default=0.0,
         ge=0.0,
         le=1.0,
         description="Minimum opportunity score threshold for hypothesis generation",
+    )
+    max_signals_per_provider: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Maximum signals to fetch per provider",
     )
 
 
@@ -587,6 +612,18 @@ class ContentIntelligenceResponseData(BaseModel):
     data_source_summary: dict = Field(
         default_factory=dict,
         description="Summary of data sources used in this analysis",
+    )
+    provider_health: dict = Field(
+        default_factory=dict,
+        description="Health status of each provider",
+    )
+    total_raw_signals: int = Field(
+        default=0,
+        description="Total number of raw signals collected from providers",
+    )
+    fetched_at: str = Field(
+        default="",
+        description="ISO timestamp when data was fetched",
     )
 
 

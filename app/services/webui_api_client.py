@@ -196,3 +196,63 @@ def api_get_batch(batch_id: str) -> dict | None:
     except Exception as exc:
         logger.warning(f"api_get_batch failed: {exc}")
         return None
+
+
+def api_content_intelligence_analyze(
+    topics: list[str] | None = None,
+    use_providers: bool = False,
+    geo: str = "ID",
+    language: str = "id",
+    category: str = "general",
+    min_score: float = 0.0,
+    max_signals_per_provider: int = 20,
+) -> dict:
+    """Run Content Intelligence analysis via API."""
+    base_url = _get_api_base_url()
+    try:
+        resp = httpx.post(
+            f"{base_url}/api/v1/content-intelligence/analyze",
+            json={
+                "topics": topics or [],
+                "use_providers": use_providers,
+                "geo": geo,
+                "language": language,
+                "category": category,
+                "min_score": min_score,
+                "max_signals_per_provider": max_signals_per_provider,
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json().get("data", {})
+    except Exception as exc:
+        logger.error(f"api_content_intelligence_analyze failed: {exc}")
+        return {"success": False, "message": str(exc)}
+
+
+def api_content_intelligence_hypotheses(
+    topics: list[str] | None = None,
+    use_providers: bool = False,
+    geo: str = "ID",
+    language: str = "id",
+    category: str = "general",
+) -> dict:
+    """Generate content hypotheses via API."""
+    base_url = _get_api_base_url()
+    try:
+        resp = httpx.post(
+            f"{base_url}/api/v1/content-intelligence/hypotheses",
+            json={
+                "topics": topics or [],
+                "use_providers": use_providers,
+                "geo": geo,
+                "language": language,
+                "category": category,
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json().get("data", {})
+    except Exception as exc:
+        logger.error(f"api_content_intelligence_hypotheses failed: {exc}")
+        return {"success": False, "message": str(exc)}

@@ -48,6 +48,22 @@ def _classify_data_source(sources: list) -> str:
     return "UNKNOWN"
 
 
+def _provider_health_to_dict(health) -> dict:
+    """Convert ProviderHealth to API response dict."""
+    return {
+        "provider_id": health.provider_id,
+        "status": health.status.value,
+        "last_success_at": health.last_success_at.isoformat() if health.last_success_at else None,
+        "last_failure_at": health.last_failure_at.isoformat() if health.last_failure_at else None,
+        "last_error": health.last_error,
+        "total_requests": health.total_requests,
+        "total_failures": health.total_failures,
+        "total_signals": health.total_signals,
+        "success_rate": round(health.success_rate, 4),
+        "average_response_time_ms": round(health.average_response_time_ms, 2),
+    }
+
+
 def _opportunity_to_dict(opp) -> dict:
     return {
         "opportunity_id": opp.opportunity_id,
@@ -120,24 +136,41 @@ def _hypothesis_to_dict(hyp) -> dict:
 def analyze_content_intelligence(
     request: Request, body: ContentIntelligenceRequest
 ):
-    """Run the complete Content Intelligence pipeline on the given topics.
+    """Run the Content Intelligence pipeline.
 
-    The pipeline:
-    1. Detects trends from input topics
-    2. Mines content opportunities
-    3. Analyzes viral patterns
-    4. Scores opportunities deterministically
-    5. Generates structured content hypotheses
-
-    Returns all intermediate and final outputs for full traceability.
+    Modes:
+    1. User topics mode (default): Analyzes user-provided topics
+    2. Provider mode (use_providers=True): Fetches real data from external providers
 
     Data source transparency:
-    - When topics are user-provided, trends are classified as USER_INPUT
-    - No external trend providers are connected by default
-    - Register external providers via TrendRadar.add_provider() for real data
+    - Trends are classified as USER_INPUT, EXTERNAL, or MIXED
+    - Provider health is included when using providers
+    - data_source_summary indicates whether external data was used
     """
-    pipeline = ci.ContentIntelligencePipeline()
-    result = pipeline.run_from_texts(body.topics)
+    registry = ci.create_provider_registry(
+        enable_google_news=True,
+        enable_hackernews=True,
+        geo=body.geo or "ID",
+        language=body.language or "id",
+    )
+    pipeline = ci.ContentIntelligencePipeline(provider_registry=registry)
+
+    result = pipeline.run(
+        use_providers=body.use_providers,
+        geo=body.geo or "ID",
+        language=body.language or "id",
+        category=body.category or "general",
+        max_signals_per_provider=body.max_signals_per_provider or 20,
+    )
+
+    if not body.use_providers and body.topics:
+        result = pipeline.run_from_texts(body.topics)
+
+    provider_health_dict = {
+        k: _provider_health_to_dict(v)
+        for k, v in result.provider_health.items()
+    }
+
     return utils.get_response(
         200,
         {
@@ -152,6 +185,9 @@ def analyze_content_intelligence(
             "success": result.success,
             "errors": result.errors,
             "data_source_summary": _build_data_source_summary(result),
+            "provider_health": provider_health_dict,
+            "total_raw_signals": result.total_raw_signals,
+            "fetched_at": result.fetched_at.isoformat(),
         },
     )
 
