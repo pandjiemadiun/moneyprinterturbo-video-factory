@@ -6427,21 +6427,14 @@ def _render_content_intelligence_view():
     # Action buttons
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("🔄 Fetch Live Trends", key="ci_fetch_live", type="primary", use_container_width=True):
-            st.session_state["ci_fetch_live"] = True
-            st.session_state["ci_fetch_text"] = False
-            st.session_state["ci_loading"] = True
+        fetch_clicked = st.button("🔄 Fetch Live Trends", key="ci_fetch_live_btn", type="primary", use_container_width=True)
     with col2:
-        if st.button("📝 Analyze Custom Topics", key="ci_fetch_text", use_container_width=True):
-            st.session_state["ci_fetch_text"] = True
-            st.session_state["ci_fetch_live"] = False
+        text_clicked = st.button("📝 Analyze Custom Topics", key="ci_fetch_text_btn", use_container_width=True)
     with col3:
-        if st.button("🔃 Refresh", key="ci_refresh", use_container_width=True):
-            st.session_state["ci_refresh"] = True
-            st.session_state["ci_loading"] = True
+        refresh_clicked = st.button("🔃 Refresh", key="ci_refresh_btn", use_container_width=True)
 
     # Custom topics input
-    if st.session_state.get("ci_fetch_text"):
+    if st.session_state.get("ci_show_text_input"):
         custom_topics = st.text_area(
             "Enter topics (one per line)",
             height=100,
@@ -6460,10 +6453,16 @@ def _render_content_intelligence_view():
                         category=category,
                     )
                 st.session_state["ci_result"] = result
-                st.session_state["ci_loading"] = False
+                st.session_state["ci_show_text_input"] = False
+                st.rerun()
 
-    # Fetch live data
-    if st.session_state.get("ci_fetch_live") or st.session_state.get("ci_refresh"):
+    # Handle button clicks via rerun pattern
+    if text_clicked:
+        st.session_state["ci_show_text_input"] = True
+        st.rerun()
+
+    if fetch_clicked:
+        st.session_state["ci_show_text_input"] = False
         with st.spinner("Fetching live data from providers..."):
             try:
                 result = webui_api_client.api_content_intelligence_analyze(
@@ -6480,9 +6479,26 @@ def _render_content_intelligence_view():
                     "success": False,
                     "message": f"Network error: {str(e)}",
                 }
-        st.session_state["ci_fetch_live"] = False
-        st.session_state["ci_refresh"] = False
-        st.session_state["ci_loading"] = False
+        st.rerun()
+
+    if refresh_clicked:
+        st.session_state["ci_show_text_input"] = False
+        with st.spinner("Fetching live data from providers..."):
+            try:
+                result = webui_api_client.api_content_intelligence_analyze(
+                    topics=[],
+                    use_providers=True,
+                    geo=geo,
+                    language=language,
+                    category=category,
+                    max_signals_per_provider=max_signals,
+                )
+                st.session_state["ci_result"] = result
+            except Exception as e:
+                st.session_state["ci_result"] = {
+                    "success": False,
+                    "message": f"Network error: {str(e)}",
+                }
         st.rerun()
 
     # Display results
