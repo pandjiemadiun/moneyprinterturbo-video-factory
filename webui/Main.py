@@ -1441,7 +1441,7 @@ def _render_top_bar():
                 "create": tr("Nav Create"),
                 "videos": tr("Nav Videos"),
                 "jobs": tr("Nav Jobs"),
-                "intelligence": tr("Nav Intelligence") if "Nav Intelligence" in tr.__self__ else "Intelligence",
+                "intelligence": "Intelligence",
             }
             current_nav = st.session_state.get("nav_view", "create")
             selected_nav = st.segmented_control(
@@ -6385,7 +6385,11 @@ def _render_content_intelligence_view():
     Provides real-time trend analysis, opportunity mining, and content hypotheses
     from external data providers (Google News RSS, Hacker News).
     """
-    st.write("Content Intelligence")
+    st.markdown(
+        "<h2 style='margin-bottom: 0;'>Content Intelligence</h2>"
+        "<p style='color: #666; margin-top: 0;'>Real-time trend analysis and content opportunities from external data sources.</p>",
+        unsafe_allow_html=True,
+    )
 
     # Controls
     with st.expander("⚙️ Analysis Controls", expanded=False):
@@ -6426,6 +6430,7 @@ def _render_content_intelligence_view():
         if st.button("🔄 Fetch Live Trends", key="ci_fetch_live", type="primary", use_container_width=True):
             st.session_state["ci_fetch_live"] = True
             st.session_state["ci_fetch_text"] = False
+            st.session_state["ci_loading"] = True
     with col2:
         if st.button("📝 Analyze Custom Topics", key="ci_fetch_text", use_container_width=True):
             st.session_state["ci_fetch_text"] = True
@@ -6433,6 +6438,7 @@ def _render_content_intelligence_view():
     with col3:
         if st.button("🔃 Refresh", key="ci_refresh", use_container_width=True):
             st.session_state["ci_refresh"] = True
+            st.session_state["ci_loading"] = True
 
     # Custom topics input
     if st.session_state.get("ci_fetch_text"):
@@ -6459,17 +6465,24 @@ def _render_content_intelligence_view():
     # Fetch live data
     if st.session_state.get("ci_fetch_live") or st.session_state.get("ci_refresh"):
         with st.spinner("Fetching live data from providers..."):
-            result = webui_api_client.api_content_intelligence_analyze(
-                topics=[],
-                use_providers=True,
-                geo=geo,
-                language=language,
-                category=category,
-                max_signals_per_provider=max_signals,
-            )
-        st.session_state["ci_result"] = result
+            try:
+                result = webui_api_client.api_content_intelligence_analyze(
+                    topics=[],
+                    use_providers=True,
+                    geo=geo,
+                    language=language,
+                    category=category,
+                    max_signals_per_provider=max_signals,
+                )
+                st.session_state["ci_result"] = result
+            except Exception as e:
+                st.session_state["ci_result"] = {
+                    "success": False,
+                    "message": f"Network error: {str(e)}",
+                }
         st.session_state["ci_fetch_live"] = False
         st.session_state["ci_refresh"] = False
+        st.session_state["ci_loading"] = False
         st.rerun()
 
     # Display results
@@ -6505,10 +6518,16 @@ def _render_content_intelligence_view():
                 )
                 if health.get("average_response_time_ms"):
                     st.caption(f"Response: {health['average_response_time_ms']:.0f}ms")
+                if health.get("last_error"):
+                    with st.expander("Error Details", expanded=False):
+                        st.caption(health["last_error"])
 
     # Data source summary
     summary = result.get("data_source_summary", {})
     if summary:
+        has_external = summary.get("has_external_data", False)
+        if has_external:
+            st.success(f"✅ Live data from {', '.join(summary.get('trend_sources', []))}")
         with st.expander("📊 Data Source Summary", expanded=False):
             st.json(summary)
 
@@ -6532,7 +6551,7 @@ def _render_content_intelligence_view():
                     st.caption(f"Source: {classification}")
 
                 # Metadata
-                meta_col1, meta_col2, meta_col3, meta_col4 = st.columns(4)
+                meta_col1, meta_col2, meta_col3 = st.columns(3)
                 with meta_col1:
                     st.caption(f"Strength: {trend.get('strength', 0):.2f}")
                 with meta_col2:
@@ -6540,17 +6559,26 @@ def _render_content_intelligence_view():
                 with meta_col3:
                     sources = trend.get("sources", [])
                     st.caption(f"Sources: {', '.join(sources)}")
-                with meta_col4:
-                    evidence = trend.get("evidence", [])
-                    if evidence and evidence[0].startswith("url="):
-                        url = evidence[0][4:]
-                        st.link_button("🔗 Source", url=url, help="Open original source")
+
+                # Source link
+                evidence = trend.get("evidence", [])
+                source_url = None
+                for ev in evidence:
+                    if ev.startswith("url="):
+                        source_url = ev[4:]
+                        break
+                    elif ev.startswith("source_url="):
+                        source_url = ev[10:]
+                        break
+                if source_url:
+                    st.link_button("🔗 Open Source", url=source_url, help="Open original source")
 
                 # Evidence
-                if trend.get("evidence"):
+                if evidence:
                     with st.expander("Evidence", expanded=False):
-                        for ev in trend.get("evidence", []):
-                            st.caption(ev)
+                        for ev in evidence:
+                            if not ev.startswith("url="):
+                                st.caption(ev)
 
                 st.divider()
 
@@ -6567,12 +6595,38 @@ def _render_content_intelligence_view():
                     score = opp.get("score_total", 0)
                     st.caption(f"Score: {score:.2f}" if score else "Score: N/A")
 
+                st.caption(f"Category: {opp.get('metadata', {}).get('category', 'N/A') if isinstance(opp.get('metadata'), dict) else 'N/A'}")
                 st.caption(f"Angle: {opp.get('angle', 'N/A')}")
                 st.caption(f"Audience: {opp.get('audience', 'N/A')}")
 
                 if opp.get("score_explanation"):
                     with st.expander("Score Explanation", expanded=False):
                         st.caption(opp["score_explanation"])
+
+                st.divider()
+
+    # Viral Patterns
+    patterns = result.get("patterns", [])
+    if patterns:
+        st.subheader(f"Viral Patterns ({len(patterns)})")
+        for i, pattern in enumerate(patterns[:5]):
+            with st.container():
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.markdown(f"**{pattern.get('name', 'Unknown')}**")
+                with col2:
+                    st.caption(f"Type: {pattern.get('pattern_type', 'N/A')}")
+
+                st.caption(f"Description: {pattern.get('description', 'N/A')}")
+
+                # Evidence with observed vs inferred
+                evidence = pattern.get("evidence", [])
+                if evidence:
+                    with st.expander("Evidence", expanded=False):
+                        for ev in evidence:
+                            is_observed = ev.get("is_observed", True)
+                            icon = "👁️" if is_observed else "🧠"
+                            st.caption(f"{icon} {ev.get('description', '')} (confidence: {ev.get('confidence', 0):.2f})")
 
                 st.divider()
 
@@ -6599,10 +6653,65 @@ def _render_content_intelligence_view():
                     keywords = hyp.get("keywords", [])
                     st.caption(f"Keywords: {', '.join(keywords[:3])}")
 
+                # Create Video from Hypothesis button
+                if st.button(
+                    "🎬 Create Video from This",
+                    key=f"ci_create_video_{i}",
+                    help="Use this hypothesis to create a video",
+                ):
+                    st.session_state["ci_selected_hypothesis"] = hyp
+                    st.session_state["ci_show_create_dialog"] = True
+
                 st.divider()
 
+    # Create Video Dialog
+    if st.session_state.get("ci_show_create_dialog"):
+        hyp = st.session_state.get("ci_selected_hypothesis")
+        if hyp:
+            with st.container():
+                st.subheader("🎬 Create Video from Hypothesis")
+                st.info("Review and edit the video parameters, then create your video.")
+
+                # Pre-fill from hypothesis
+                default_subject = hyp.get("topic", "")
+                default_script_prompt = f"Topic: {hyp.get('topic', '')}. Hook: {hyp.get('proposed_hook', '')}. Promise: {hyp.get('content_promise', '')}. Format: {hyp.get('format', '')}."
+                default_keywords = ", ".join(hyp.get("keywords", []))
+
+                video_subject = st.text_input(
+                    "Video Subject",
+                    value=default_subject,
+                    key="ci_video_subject",
+                )
+                script_prompt = st.text_area(
+                    "Script Prompt",
+                    value=default_script_prompt,
+                    height=100,
+                    key="ci_script_prompt",
+                )
+                video_keywords = st.text_input(
+                    "Video Keywords",
+                    value=default_keywords,
+                    key="ci_video_keywords",
+                )
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Create Video", key="ci_confirm_create", type="primary"):
+                        # Store the parameters and switch to create view
+                        st.session_state["prefill_video_subject"] = video_subject
+                        st.session_state["prefill_script_prompt"] = script_prompt
+                        st.session_state["prefill_video_keywords"] = video_keywords
+                        st.session_state["nav_view"] = "create"
+                        st.session_state["ci_show_create_dialog"] = False
+                        st.success("Parameters set! Switching to Create Video...")
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Cancel", key="ci_cancel_create"):
+                        st.session_state["ci_show_create_dialog"] = False
+                        st.rerun()
+
     # Empty state
-    if not trends and not opportunities and not hypotheses:
+    if not trends and not opportunities and not hypotheses and not patterns:
         st.info("No results. Try adjusting the controls or fetching live data.")
 
 

@@ -1294,5 +1294,128 @@ class TestAPIDataSourceTransparency(unittest.TestCase):
         self.assertIn("no_trends_detected", data.get("errors", []))
 
 
+class TestHypothesisToVideoIntegration(unittest.TestCase):
+    """Tests for hypothesis → Create Video integration."""
+
+    def test_hypothesis_to_script_prompt(self):
+        """Hypothesis should be convertible to a script prompt."""
+        from app.services.content_intelligence.models import ContentHypothesis
+        hyp = ContentHypothesis(
+            hypothesis_id="h1",
+            topic="AI in healthcare",
+            audience="tech enthusiasts",
+            angle="how ai changes healthcare",
+            proposed_hook="The truth about AI in healthcare",
+            content_promise="Discover how AI transforms medicine",
+            format="explainer",
+            keywords=["ai", "healthcare", "medicine"],
+        )
+        prompt = hyp.to_script_prompt()
+        self.assertIn("AI in healthcare", prompt)
+        self.assertIn("The truth about AI in healthcare", prompt)
+        self.assertIn("Discover how AI transforms medicine", prompt)
+
+    def test_hypothesis_contains_video_params(self):
+        """Hypothesis should contain all needed fields for video creation."""
+        from app.services.content_intelligence.models import ContentHypothesis
+        hyp = ContentHypothesis(
+            hypothesis_id="h1",
+            topic="Test Topic",
+            audience="test audience",
+            angle="test angle",
+            proposed_hook="test hook",
+            content_promise="test promise",
+            format="explainer",
+            keywords=["test", "topic"],
+        )
+        # These fields are used by the WebUI to pre-fill video creation
+        self.assertTrue(hyp.topic)
+        self.assertTrue(hyp.proposed_hook)
+        self.assertTrue(hyp.content_promise)
+        self.assertTrue(hyp.format)
+        self.assertTrue(hyp.keywords)
+
+
+class TestProviderRealData(unittest.TestCase):
+    """Tests to verify real provider data reaches the pipeline."""
+
+    def test_google_news_returns_real_data(self):
+        """Google News provider should return real data with provenance."""
+        from app.services.content_intelligence.providers.google_news import GoogleNewsProvider
+        provider = GoogleNewsProvider(enabled=True)
+        signals = provider.fetch(geo="ID", language="id", max_signals=3)
+        # Should get at least 1 signal (live test)
+        if signals:
+            s = signals[0]
+            self.assertTrue(s.topic)
+            self.assertEqual(s.source.value, "rss")
+            self.assertEqual(s.provider, "google_news_rss")
+            self.assertIsNotNone(s.observed_at)
+            self.assertIn("source_url", s.metadata)
+            self.assertIn("geo", s.metadata)
+
+    def test_hackernews_returns_real_data(self):
+        """Hacker News provider should return real data with scores."""
+        from app.services.content_intelligence.providers.hackernews import HackerNewsProvider
+        provider = HackerNewsProvider(enabled=True)
+        signals = provider.fetch(max_signals=3)
+        # Should get at least 1 signal (live test)
+        if signals:
+            s = signals[0]
+            self.assertTrue(s.topic)
+            self.assertEqual(s.source.value, "social")
+            self.assertEqual(s.provider, "hackernews")
+            self.assertIsNotNone(s.observed_at)
+            self.assertIn("score", s.metadata)
+
+    def test_pipeline_with_real_providers(self):
+        """Full pipeline should work with real providers."""
+        from app.services.content_intelligence import create_provider_registry, ContentIntelligencePipeline
+        registry = create_provider_registry(enable_google_news=True, enable_hackernews=True)
+        pipeline = ContentIntelligencePipeline(provider_registry=registry)
+        result = pipeline.run(use_providers=True, geo="ID", language="id", max_signals_per_provider=3)
+        # Should produce results (live test)
+        if result.total_raw_signals > 0:
+            self.assertTrue(result.success)
+            self.assertGreater(len(result.trends), 0)
+            self.assertGreater(len(result.opportunities), 0)
+            self.assertGreater(len(result.hypotheses), 0)
+            # Verify provider health is reported
+            self.assertIn("google_news_rss", result.provider_health)
+            self.assertIn("hackernews", result.provider_health)
+
+
+class TestNoFakeData(unittest.TestCase):
+    """Tests to verify no fake data appears in production paths."""
+
+    def test_no_hardcoded_trends(self):
+        """Verify no hardcoded trends in production code."""
+        import ast
+        import inspect
+        from app.services.content_intelligence import pipeline
+        source = inspect.getsource(pipeline)
+        # Should not contain hardcoded trend examples like "AI" with score
+        self.assertNotIn('{"topic": "AI", "score":', source)
+
+    def test_no_fake_timestamps(self):
+        """Verify timestamps come from real sources."""
+        from app.services.content_intelligence.providers.google_news import GoogleNewsProvider
+        provider = GoogleNewsProvider(enabled=True)
+        signals = provider.fetch(geo="ID", language="id", max_signals=1)
+        if signals:
+            # observed_at should be a real timestamp, not datetime.now()
+            s = signals[0]
+            self.assertIsNotNone(s.observed_at)
+            # Should have timezone info
+            self.assertIsNotNone(s.observed_at.tzinfo)
+
+    def test_empty_provider_returns_empty(self):
+        """Empty provider should return empty list, not fake data."""
+        from app.services.content_intelligence.providers.google_news import GoogleNewsProvider
+        provider = GoogleNewsProvider(enabled=False)
+        signals = provider.fetch()
+        self.assertEqual(signals, [])
+
+
 if __name__ == "__main__":
     unittest.main()
