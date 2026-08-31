@@ -1469,13 +1469,13 @@ def _render_top_bar():
                     selected_index = i
 
             selected_language_code = st.selectbox(
-                "Language / 语言",
+                "Language",
                 options=language_codes,
                 index=selected_index,
-                format_func=lambda code: locales[code].get("Language", code),
+                format_func=lambda code: code.split("-")[0].upper(),
                 key="top_language_code_selector",
                 label_visibility="collapsed",
-                width=180,
+                width=80,
             )
             if selected_language_code != st.session_state.get("ui_language", ""):
                 st.session_state["ui_language"] = selected_language_code
