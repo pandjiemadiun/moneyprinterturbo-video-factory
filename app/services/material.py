@@ -332,12 +332,27 @@ def _reframe_landscape_to_portrait(
 
         ffmpeg_binary = utils.get_ffmpeg_binary()
 
+        # Calculate dimensions for scale-to-cover + center crop
         # Scale so source height matches target portrait height
-        # Then center-crop to target portrait width
-        # Use -1 for width to maintain aspect ratio (ffmpeg will make it even)
+        # This causes horizontal overflow that we crop
+        scale_factor = target_height / src_height
+        scaled_width = int(src_width * scale_factor)
+        scaled_height = target_height
+
+        # Ensure scaled width is at least target_width for cropping
+        if scaled_width < target_width:
+            scale_factor = target_width / src_width
+            scaled_width = target_width
+            scaled_height = int(src_height * scale_factor)
+
+        # Ensure even dimensions for ffmpeg compatibility
+        scaled_width = scaled_width + (scaled_width % 2)
+        scaled_height = scaled_height + (scaled_height % 2)
+
+        ffmpeg_binary = utils.get_ffmpeg_binary()
         filter_str = (
-            f"scale=-1:{target_height}:flags=lanczos,"
-            f"crop={target_width}:{target_height}:(in_w-{target_width})/2:0,"
+            f"scale={scaled_width}:{scaled_height}:flags=lanczos,"
+            f"crop=w={target_width}:h={target_height},"
             f"setsar=1"
         )
 
