@@ -32,7 +32,20 @@ def _trend_to_dict(trend) -> dict:
         "first_observed": trend.first_observed.isoformat(),
         "latest_observed": trend.latest_observed.isoformat(),
         "evidence": trend.evidence,
+        "data_source_classification": _classify_data_source(trend.sources),
     }
+
+
+def _classify_data_source(sources: list) -> str:
+    """Classify the data source type for transparency."""
+    source_values = {s.value for s in sources}
+    if source_values == {"manual"}:
+        return "USER_INPUT"
+    if "manual" in source_values and len(source_values) > 1:
+        return "MIXED"
+    if source_values - {"manual"}:
+        return "EXTERNAL"
+    return "UNKNOWN"
 
 
 def _opportunity_to_dict(opp) -> dict:
@@ -117,6 +130,11 @@ def analyze_content_intelligence(
     5. Generates structured content hypotheses
 
     Returns all intermediate and final outputs for full traceability.
+
+    Data source transparency:
+    - When topics are user-provided, trends are classified as USER_INPUT
+    - No external trend providers are connected by default
+    - Register external providers via TrendRadar.add_provider() for real data
     """
     pipeline = ci.ContentIntelligencePipeline()
     result = pipeline.run_from_texts(body.topics)
@@ -133,8 +151,25 @@ def analyze_content_intelligence(
             ],
             "success": result.success,
             "errors": result.errors,
+            "data_source_summary": _build_data_source_summary(result),
         },
     )
+
+
+def _build_data_source_summary(result) -> dict:
+    """Build a summary of data sources for transparency."""
+    all_sources = set()
+    for trend in result.trends:
+        for source in trend.sources:
+            all_sources.add(source.value)
+    return {
+        "trend_sources": sorted(all_sources),
+        "has_external_data": bool(all_sources - {"manual"}),
+        "total_trends": len(result.trends),
+        "total_opportunities": len(result.opportunities),
+        "total_patterns": len(result.patterns),
+        "total_hypotheses": len(result.hypotheses),
+    }
 
 
 @router.post(

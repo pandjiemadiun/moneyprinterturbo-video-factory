@@ -584,6 +584,10 @@ class ContentIntelligenceResponseData(BaseModel):
     hypotheses: list[dict] = Field(default_factory=list)
     success: bool = True
     errors: list[str] = Field(default_factory=list)
+    data_source_summary: dict = Field(
+        default_factory=dict,
+        description="Summary of data sources used in this analysis",
+    )
 
 
 class ContentIntelligenceResponse(BaseResponse):

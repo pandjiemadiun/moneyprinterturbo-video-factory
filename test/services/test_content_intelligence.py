@@ -1142,5 +1142,157 @@ class TestRegressionBugFixes(unittest.TestCase):
         self.assertIsNone(result.top_hypothesis)
 
 
+    def test_pipeline_result_top_hypothesis_empty(self):
+        """top_hypothesis returns None when no hypotheses."""
+        result = PipelineResult()
+        self.assertIsNone(result.top_hypothesis)
+
+
+# ===========================================================================
+# H. DATA SOURCE TRANSPARENCY TESTS
+# ===========================================================================
+
+class TestDataSourceTransparency(unittest.TestCase):
+    """Tests to verify data source transparency and prevent fake data."""
+
+    def test_user_input_marked_as_manual_source(self):
+        """User-provided topics should be marked with MANUAL source."""
+        pipeline = ContentIntelligencePipeline()
+        result = pipeline.run_from_texts(["AI in healthcare"])
+        self.assertGreater(len(result.trends), 0)
+        for trend in result.trends:
+            self.assertIn(TrendSource.MANUAL, trend.sources)
+
+    def test_no_fake_external_sources(self):
+        """Without external providers, no trends should claim external sources."""
+        pipeline = ContentIntelligencePipeline()
+        result = pipeline.run_from_texts(["AI in healthcare", "Climate change"])
+        for trend in result.trends:
+            for source in trend.sources:
+                self.assertEqual(source, TrendSource.MANUAL)
+
+    def test_empty_input_returns_empty_trends(self):
+        """Empty input should return empty trends, not fake data."""
+        pipeline = ContentIntelligencePipeline()
+        result = pipeline.run_from_texts([])
+        self.assertEqual(len(result.trends), 0)
+        self.assertIn("no_trends_detected", result.errors)
+
+    def test_freshness_based_on_observation_time(self):
+        """Freshness should be derived from actual observation time."""
+        from datetime import datetime, timedelta, timezone
+        radar = TrendRadar()
+        now = datetime.now(timezone.utc)
+        old_time = now - timedelta(days=7)
+        signals_old = [
+            RawSignal(
+                source=TrendSource.MANUAL,
+                topic="Old topic",
+                observed_at=old_time,
+            )
+        ]
+        signals_new = [
+            RawSignal(
+                source=TrendSource.MANUAL,
+                topic="New topic",
+                observed_at=now,
+            )
+        ]
+        trends_old = radar.detect_trends(signals_old)
+        trends_new = radar.detect_trends(signals_new)
+        self.assertEqual(len(trends_old), 1)
+        self.assertEqual(len(trends_new), 1)
+        self.assertGreater(trends_new[0].freshness, trends_old[0].freshness)
+
+    def test_scores_explainable(self):
+        """All scores must have explanations."""
+        pipeline = ContentIntelligencePipeline()
+        result = pipeline.run_from_texts(["AI in healthcare"])
+        for opp in result.opportunities:
+            if opp.score:
+                self.assertTrue(opp.score.explanation)
+                for dim in opp.score.dimensions:
+                    self.assertTrue(dim.explanation)
+
+    def test_observed_vs_inference_distinguishable(self):
+        """Observed evidence must be distinguishable from inference."""
+        analyzer = ViralAnalyzer()
+        trends = [
+            Trend(
+                trend_id="t1",
+                topic="Why AI is changing everything",
+                canonical_key="ai changing everything",
+            )
+        ]
+        patterns = analyzer.analyze_trends(trends)
+        for pattern in patterns:
+            for evidence in pattern.evidence:
+                # Deterministic patterns should be marked as observed
+                if evidence.source in (
+                    "hook_detection",
+                    "emotional_framing_detection",
+                    "curiosity_gap_detection",
+                    "list_structure_detection",
+                    "problem_solution_detection",
+                    "controversy_detection",
+                    "recurring_theme_detection",
+                ):
+                    self.assertTrue(evidence.is_observed)
+
+
+class TestAPIDataSourceTransparency(unittest.TestCase):
+    """Tests for API-level data source transparency."""
+
+    def test_api_response_includes_data_source_summary(self):
+        """API response should include data source summary."""
+        from fastapi.testclient import TestClient
+        from app.asgi import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/content-intelligence/analyze",
+            json={"topics": ["AI in healthcare"]},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json().get("data", {})
+        self.assertIn("data_source_summary", data)
+        summary = data["data_source_summary"]
+        self.assertIn("trend_sources", summary)
+        self.assertIn("has_external_data", summary)
+        self.assertFalse(summary["has_external_data"])
+
+    def test_api_trends_include_source_classification(self):
+        """API trends should include data_source_classification."""
+        from fastapi.testclient import TestClient
+        from app.asgi import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/content-intelligence/analyze",
+            json={"topics": ["AI in healthcare"]},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json().get("data", {})
+        trends = data.get("trends", [])
+        self.assertGreater(len(trends), 0)
+        for trend in trends:
+            self.assertIn("data_source_classification", trend)
+            self.assertEqual(trend["data_source_classification"], "USER_INPUT")
+
+    def test_api_empty_input_returns_error(self):
+        """API should return explicit error for empty input."""
+        from fastapi.testclient import TestClient
+        from app.asgi import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/content-intelligence/analyze",
+            json={"topics": []},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json().get("data", {})
+        self.assertIn("no_trends_detected", data.get("errors", []))
+
+
 if __name__ == "__main__":
     unittest.main()
