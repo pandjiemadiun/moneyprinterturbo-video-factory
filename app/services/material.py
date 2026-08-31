@@ -504,6 +504,41 @@ def _normalize_material_to_portrait(
     return None
 
 
+def _search_with_fallback(
+    search_term: str,
+    sources: List[str],
+    minimum_duration: int,
+    video_aspect: VideoAspect,
+) -> tuple[List[MaterialInfo], Optional[str]]:
+    """
+    Search for materials across multiple providers with fallback.
+
+    Returns (items, provider_name) where provider_name is the provider
+    that returned results, or None if all providers failed.
+
+    This is the canonical provider fallback implementation used by
+    both legacy and scene-aware paths.
+    """
+    for src in sources:
+        provider, remote_search_videos = _provider_and_searcher(src)
+
+        try:
+            items = _search_videos_with_cache(
+                provider=provider,
+                search_videos=remote_search_videos,
+                search_term=search_term,
+                minimum_duration=minimum_duration,
+                video_aspect=video_aspect,
+            )
+            if items:
+                return items, provider
+        except Exception as exc:
+            logger.warning(f"Provider {provider} failed for '{search_term}': {exc}")
+            continue
+
+    return [], None
+
+
 def search_videos_pexels(
     search_term: str,
     minimum_duration: int,
@@ -2180,31 +2215,30 @@ def download_videos(
     audio_duration: float = 0.0,
     max_clip_duration: int = 5,
     match_script_order: bool = False,
+    sources: Optional[List[str]] = None,
 ) -> List[str]:
-    provider = "pexels"
-    remote_search_videos = search_videos_pexels
-    if source == "pixabay":
-        provider = "pixabay"
-        remote_search_videos = search_videos_pixabay
-    elif source == "coverr":
-        provider = "coverr"
-        remote_search_videos = search_videos_coverr
-    elif source == "youtube":
-        provider = "youtube"
-        remote_search_videos = search_videos_youtube
+    """Download video materials with multi-provider fallback.
 
-    def search_videos(
-        search_term: str,
-        minimum_duration: int,
-        video_aspect: VideoAspect,
-    ) -> List[MaterialInfo]:
-        return _search_videos_with_cache(
-            provider=provider,
-            search_videos=remote_search_videos,
-            search_term=search_term,
-            minimum_duration=minimum_duration,
-            video_aspect=video_aspect,
-        )
+    The ``sources`` parameter is an ordered fallback list (e.g.
+    ``["pexels", "pixabay", "coverr"]``).  When provided, the resolver
+    tries providers left-to-right; the FIRST provider that returns
+    usable candidates wins.
+
+    For backward compatibility, ``source`` is used when ``sources`` is
+    not provided, but fallback is still attempted across all available
+    providers.
+    """
+    # Build fallback list: explicit sources or default chain
+    if sources is None:
+        sources = [source, "pexels", "pixabay", "coverr"]
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_sources = []
+    for s in sources:
+        if s not in seen:
+            unique_sources.append(s)
+            seen.add(s)
+    sources = unique_sources
 
     material_directory = config.app.get("material_directory", "").strip()
     if material_directory == "task":
@@ -2230,23 +2264,25 @@ def download_videos(
         return _download_videos_by_script_order(
             task_id=task_id,
             search_terms=search_terms,
-            search_videos=search_videos,
             video_aspect=video_aspect,
             audio_duration=audio_duration,
             max_clip_duration=max_clip_duration,
             material_directory=material_directory,
+            sources=sources,
         )
 
     valid_video_items = []
     valid_video_urls = []
     found_duration = 0.0
     for search_term in search_terms:
-        video_items = search_videos(
+        # Use shared fallback helper
+        video_items, provider = _search_with_fallback(
             search_term=search_term,
+            sources=sources,
             minimum_duration=max_clip_duration,
             video_aspect=video_aspect,
         )
-        logger.info(f"found {len(video_items)} videos for '{search_term}'")
+        logger.info(f"found {len(video_items)} videos for '{search_term}' (provider={provider})")
 
         for item in video_items:
             if item.url not in valid_video_urls:
@@ -2652,33 +2688,34 @@ def _download_videos_wavespeed_on_demand(
 def _download_videos_by_script_order(
     task_id: str,
     search_terms: List[str],
-    search_videos,
     video_aspect: VideoAspect,
     audio_duration: float,
     max_clip_duration: int,
     material_directory: str,
+    sources: Optional[List[str]] = None,
 ) -> List[str]:
-    """
-    按脚本文案顺序下载素材。
+    """Download video materials in script order with multi-provider fallback.
 
-    默认下载逻辑会把所有关键词的候选素材合并成一个大列表；如果第一个
-    关键词返回很多结果，最终下载时可能一直消耗这个关键词的素材，后续
-    脚本主题就排不上时间线。这里按关键词分组后轮询下载：
-    第 1 轮取每个关键词的第 1 个候选，第 2 轮取每个关键词的第 2 个候选。
-    这样在不重写视频合成引擎的前提下，尽量保证素材顺序贴近文案顺序。
+    For each search term, providers are tried in order until one returns
+    usable candidates.
     """
+    if sources is None:
+        sources = ["pexels", "pixabay", "coverr"]
+
     logger.info("downloading videos with script-order material matching")
     candidate_groups = []
     valid_video_urls = set()
     found_duration = 0.0
 
     for search_term in search_terms:
-        video_items = search_videos(
+        # Use shared fallback helper
+        video_items, provider = _search_with_fallback(
             search_term=search_term,
+            sources=sources,
             minimum_duration=max_clip_duration,
             video_aspect=video_aspect,
         )
-        logger.info(f"found {len(video_items)} videos for '{search_term}'")
+        logger.info(f"found {len(video_items)} videos for '{search_term}' (provider={provider})")
 
         term_items = []
         for item in video_items:
