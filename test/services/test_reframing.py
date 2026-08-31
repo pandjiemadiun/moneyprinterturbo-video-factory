@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 from app.services.material import (
     _can_reframe_to_portrait,
     _reframe_landscape_to_portrait,
-    normalize_material_to_portrait,
+    _normalize_material_to_portrait,
 )
 
 
@@ -84,7 +84,7 @@ class TestReframeLandscapeToPortrait:
 
 
 class TestNormalizeMaterialToPortrait:
-    """Test the normalize_material_to_portrait function."""
+    """Test the _normalize_material_to_portrait function."""
 
     def test_already_portrait_returns_same_path(self, tmp_path):
         """Portrait video should return the same path."""
@@ -94,7 +94,7 @@ class TestNormalizeMaterialToPortrait:
 
     def test_nonexistent_file_returns_none(self):
         """Nonexistent file should return None."""
-        result = normalize_material_to_portrait("/nonexistent/path.mp4", 1080, 1920)
+        result = _normalize_material_to_portrait("/nonexistent/path.mp4", 1080, 1920)
         assert result is None
 
 
