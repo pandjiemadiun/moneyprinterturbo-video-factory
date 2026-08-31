@@ -1412,9 +1412,8 @@ def _switch_nav_view(view_name):
 
 
 def _render_top_bar():
-    """渲染品牌、导航、任务管理、设置和语言切换组成的页面顶部栏。"""
-    # 顶部栏分为品牌区和操作区两个独立区域。窄屏下由 Streamlit
-    # 将两个区域整体换行，操作区内部再根据剩余宽度自动换行。
+    """Render brand, navigation, settings, and language switcher in a single bar."""
+    # Top bar split into brand and actions areas
     with st.container(key="top_bar"):
         brand_col, actions_col = st.columns(
             [3.5, 2.0],
@@ -1453,8 +1452,6 @@ def _render_top_bar():
             )
             if selected_nav and selected_nav != current_nav:
                 _switch_nav_view(selected_nav)
-
-            _render_task_manager_entry()
 
             if st.button(
                 tr("Settings"),
@@ -6096,7 +6093,14 @@ def _render_video_placeholder():
 
 
 def _render_jobs_view():
-    """渲染任务管理视图，展示所有任务的状态和进度。"""
+    """Render the unified task management view (Jobs = Task Manager).
+
+    This is the single entry point for all task management:
+    - Task status overview with filter tabs
+    - Batch monitor
+    - Cleanup operations
+    - Individual task actions (cancel/retry/delete)
+    """
     st.write(tr("Jobs Title"))
 
     tasks = _collect_task_summaries()
@@ -6113,14 +6117,14 @@ def _render_jobs_view():
             )
             return
 
-    # 统计
+    # Status statistics
     queued = sum(1 for t in tasks if t.get("state") not in [const.TASK_STATE_COMPLETE, const.TASK_STATE_FAILED, -1, 1])
     processing = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_PROCESSING)
     completed = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_COMPLETE)
     failed = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_FAILED)
     cancelled = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_CANCELLED)
 
-    # 状态摘要
+    # Status summary metrics
     summary_cols = st.columns(5)
     with summary_cols[0]:
         st.metric(tr("Jobs Metric Queued"), queued)
@@ -6135,7 +6139,36 @@ def _render_jobs_view():
 
     st.divider()
 
-    # 清理操作
+    # Task status filter tabs (from Task Manager)
+    status_tabs = [
+        ("all", tr("All Tasks")),
+        ("processing", tr("Task Status Processing")),
+        ("complete", tr("Task Status Complete")),
+        ("failed", tr("Task Status Failed")),
+    ]
+    tabs = st.tabs(
+        [label for _, label in status_tabs],
+        key="jobs_status_tabs",
+        on_change="rerun",
+    )
+    for (status_key, _), tab in zip(status_tabs, tabs):
+        if not tab.open:
+            continue
+        with tab:
+            filtered_tasks = [
+                task
+                for task in tasks
+                if status_key == "all" or _task_state_filter_key(task) == status_key
+            ]
+            for task in filtered_tasks:
+                _render_job_card(task)
+
+    # Batch monitor panel (from Task Manager)
+    _render_batch_monitor_panel()
+
+    st.divider()
+
+    # Cleanup operations
     with st.expander(tr("Jobs Cleanup Title"), expanded=False):
         st.write(tr("Jobs Cleanup Desc"))
         cleanup_cols = st.columns(5)
@@ -6164,12 +6197,6 @@ def _render_jobs_view():
                 result = _api_clear_all_tasks()
                 _report_clear_result("all", result)
                 st.rerun()
-
-    st.divider()
-
-    # 任务列表
-    for task in tasks:
-        _render_job_card(task)
 
 
 def _api_clear_tasks(status: str) -> dict:
@@ -6236,11 +6263,11 @@ def _do_job_action(task_id, action):
     """
     if action == "cancel":
         result = webui_api_client.api_cancel_task(task_id)
-        success = result.get("status") == "cancelled" or result.get("success", False)
+        success = result.get("success", False)
         label = "Cancelled"
     elif action == "retry":
         result = webui_api_client.api_retry_task(task_id)
-        success = result.get("status") == "retried" or result.get("success", False)
+        success = result.get("success", False)
         label = "Retried"
     elif action == "delete":
         result = webui_api_client.api_delete_task(task_id)

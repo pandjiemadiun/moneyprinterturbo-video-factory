@@ -86,7 +86,11 @@ def api_delete_task(task_id: str) -> dict:
         if resp.status_code == 404:
             return {"success": False, "message": "task not found"}
         resp.raise_for_status()
-        return resp.json().get("data", {"success": True})
+        data = resp.json().get("data", {})
+        # API returns empty data {} on success; normalize to explicit success
+        if "success" not in data:
+            data["success"] = True
+        return data
     except Exception as exc:
         logger.error(f"api_delete_task failed: {exc}")
         return {"success": False, "message": str(exc)}
@@ -132,7 +136,11 @@ def api_cancel_task(task_id: str) -> dict:
             timeout=10,
         )
         resp.raise_for_status()
-        return resp.json().get("data", {"success": True})
+        data = resp.json().get("data", {})
+        # API returns empty data {} on success; normalize to explicit success
+        if "success" not in data:
+            data["success"] = True
+        return data
     except Exception as exc:
         logger.error(f"api_cancel_task failed: {exc}")
         return {"success": False, "message": str(exc)}
@@ -147,7 +155,11 @@ def api_retry_task(task_id: str) -> dict:
             timeout=30,
         )
         resp.raise_for_status()
-        return resp.json().get("data", {"success": True})
+        data = resp.json().get("data", {})
+        # API returns empty data {} on success; normalize to explicit success
+        if "success" not in data:
+            data["success"] = True
+        return data
     except Exception as exc:
         logger.error(f"api_retry_task failed: {exc}")
         return {"success": False, "message": str(exc)}
