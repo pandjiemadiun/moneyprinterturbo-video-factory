@@ -457,6 +457,13 @@
         "Retry Task": "Retry",
         "Play Task": "Play",
         "Download Task": "Download",
-        "Cancel Task": "Cancel"
+        "Cancel Task": "Cancel",
+        "Delete Video Confirm": "Delete Video Confirm",
+        "Delete Video Confirm Warning": "Delete video '{subject}'? This action cannot be undone.",
+        "Video Deleted": "Video deleted successfully",
+        "Delete Failed": "Delete failed: {error}",
+        "Delete Error": "Error deleting video: {error}",
+        "Confirm Delete": "Confirm Delete",
+        "Cancel": "Cancel"
     }
 }

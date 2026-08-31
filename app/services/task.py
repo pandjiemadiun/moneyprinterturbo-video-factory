@@ -26,6 +26,7 @@ from app.services import (
     task_artifacts,
     twelvelabs,
     video,
+    visual_intelligence,
     voice,
 )
 from app.services import upload_post
@@ -356,6 +357,26 @@ def generate_terms(task_id, params, video_script):
             video_subject=params.video_subject,
             search_terms=video_terms,
         )
+
+    # VISUAL INTELLIGENCE ENHANCEMENT
+    # Enhance search terms with visual-intent derived queries to improve
+    # footage relevance. This converts abstract/conceptual terms into
+    # concrete visual search queries for stock providers.
+    logger.info("enhancing search terms with visual intelligence")
+    visual_language = params.video_language or "id"
+    try:
+        enhanced_terms = visual_intelligence.generate_enhanced_search_terms(
+            video_subject=params.video_subject,
+            video_script=video_script,
+            original_terms=video_terms,
+            language=visual_language,
+            mode="prioritize",  # Keep LLM terms first, add visual variants
+        )
+        if enhanced_terms:
+            logger.info(f"enhanced terms: {enhanced_terms[:3]}... (total: {len(enhanced_terms)})")
+            video_terms = enhanced_terms
+    except Exception as e:
+        logger.warning(f"visual intelligence enhancement failed: {e}, falling back to original terms")
 
     return video_terms
 

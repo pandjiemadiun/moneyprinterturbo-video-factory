@@ -278,6 +278,149 @@ def _matches_video_aspect(
     return False
 
 
+def _can_reframe_to_portrait(width: int, height: int, target_width: int, target_height: int) -> bool:
+    """
+    Determine if a landscape source can be safely reframed to portrait.
+
+    A landscape source is eligible for reframing if it provides enough pixels
+    for a 9:16 crop at the required output resolution.
+
+    The landscape source must be at least as wide as the target portrait width
+    and tall enough to preserve quality after scaling.
+
+    Formula:
+        - Source must be landscape (width > height)
+        - Source width >= target_height (portrait width becomes landscape height)
+        - Source height >= target_width (portrait height needs sufficient pixels)
+
+    For 9:16 portrait at 1080x1920:
+        - Source must be at least 1920x1080 (Full HD landscape)
+    """
+    if width <= 0 or height <= 0:
+        return False
+    if width <= height:
+        return False  # Not landscape
+    # After reframing: landscape height becomes portrait width
+    # We need source height >= target_width to avoid upscaling
+    # And source width must be large enough to crop target_height from
+    return height >= target_width and width >= target_height
+
+
+def _reframe_landscape_to_portrait(
+    input_path: str,
+    output_path: str,
+    target_width: int,
+    target_height: int,
+) -> bool:
+    """
+    Reframe a landscape video to portrait using crop + scale.
+
+    Algorithm:
+        1. Scale the landscape source so it fully covers the portrait canvas
+           (scale to fit the portrait height, allowing horizontal overflow)
+        2. Center-crop the excess horizontal area
+        3. Never stretch or distort
+
+    For a 1920x1080 landscape source → 1080x1920 portrait:
+        - Scale factor: target_height / source_height = 1920 / 1080 = 1.778
+        - Scaled dimensions: 3413x1920
+        - Crop center 1080x1920
+
+    Uses ffmpeg for hardware-accelerated processing when available.
+    """
+    try:
+        import subprocess
+
+        # Calculate scale to cover portrait canvas
+        # We want the source to fully cover the target portrait dimensions
+        # Scale based on the dimension that needs to cover the most
+        probe_cmd = [
+            utils.get_ffmpeg_binary().replace("ffmpeg", "ffprobe"),
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,duration,r_frame_rate",
+            "-of", "csv=p=0",
+            input_path,
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        if probe_result.returncode != 0:
+            logger.warning(f"ffprobe failed for {input_path}: {probe_result.stderr}")
+            return False
+
+        # Parse ffprobe output: width,height,duration,framerate
+        parts = probe_result.stdout.strip().split(",")
+        if len(parts) < 2:
+            return False
+
+        src_width = int(parts[0])
+        src_height = int(parts[1])
+
+        if src_width <= 0 or src_height <= 0:
+            return False
+
+        # Calculate scaling to cover portrait canvas
+        # Scale so that the smaller dimension fills the target
+        scale_w = target_width / src_height  # landscape height → portrait width
+        scale_h = target_height / src_width  # landscape width → portrait height
+
+        # Use the larger scale to ensure full coverage
+        scale = max(scale_w, scale_h)
+
+        scaled_w = int(src_height * scale)  # This becomes the width after rotation logic
+        scaled_h = int(src_width * scale)
+
+        # For landscape → portrait: we scale so source height covers target width
+        # and source width covers target height
+        # Then center crop
+
+        # Simpler approach: scale to fit target height, then center crop width
+        scale_factor = target_height / src_height
+        scaled_width = int(src_width * scale_factor)
+        scaled_height = target_height
+
+        # Ensure scaled width is at least target_width for cropping
+        if scaled_width < target_width:
+            scale_factor = target_width / src_width
+            scaled_width = target_width
+            scaled_height = int(src_height * scale_factor)
+
+        # Center crop
+        x_offset = (scaled_width - target_width) // 2
+        y_offset = (scaled_height - target_height) // 2
+
+        ffmpeg_binary = utils.get_ffmpeg_binary()
+        filter_str = (
+            f"scale={scaled_width}:{scaled_height}:flags=lanczos,"
+            f"crop={target_width}:{target_height}:{x_offset}:{y_offset},"
+            f"setsar=1"
+        )
+
+        cmd = [
+            ffmpeg_binary,
+            "-y",
+            "-i", input_path,
+            "-vf", filter_str,
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "23",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            "-r", "30",
+            output_path,
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            logger.warning(f"Reframing failed: {result.stderr[:200]}")
+            return False
+
+        return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
+    except Exception as exc:
+        logger.error(f"Reframing error: {exc}")
+        return False
+
+
 def _filter_materials_by_aspect(
     items: List[MaterialInfo],
     video_aspect: VideoAspect,
@@ -288,6 +431,10 @@ def _filter_materials_by_aspect(
     素材搜索缓存最长保留 24 小时，升级前写入的缓存可能包含方向不匹配的素材。
     在统一缓存入口过滤可以让修复立即生效，也能防御第三方 Provider 或旧缓存
     遗漏远端筛选。无法读取 rendition 尺寸的旧条目按未验证处理并跳过。
+
+    For portrait targets:
+        Priority 1: Native portrait sources
+        Priority 2: Landscape sources that can be safely reframed
     """
     aspect = VideoAspect(video_aspect)
     if aspect == VideoAspect.square:
@@ -295,18 +442,84 @@ def _filter_materials_by_aspect(
         # 接受可用候选并交给视频合成阶段裁剪，避免升级后 1:1 任务无素材。
         return list(items)
 
-    filtered_items = []
+    video_width, video_height = aspect.to_resolution()
+
+    native_items = []
+    reframeable_items = []
+
     for item in items:
         source_info = item.source_info if isinstance(item.source_info, dict) else {}
         rendition = source_info.get("rendition")
         rendition = rendition if isinstance(rendition, dict) else {}
-        if _matches_video_aspect(
-            rendition.get("width"),
-            rendition.get("height"),
-            aspect,
+        width = rendition.get("width")
+        height = rendition.get("height")
+
+        if _matches_video_aspect(width, height, aspect):
+            native_items.append(item)
+        elif aspect == VideoAspect.portrait and _can_reframe_to_portrait(
+            int(width or 0), int(height or 0), video_width, video_height
         ):
-            filtered_items.append(item)
-    return filtered_items
+            # Mark as reframable for portrait targets
+            reframeable_items.append(item)
+
+    # Prefer native portrait, but allow reframable landscape as fallback
+    if native_items:
+        return native_items
+    return reframeable_items
+
+
+def normalize_material_to_portrait(
+    video_path: str,
+    target_width: int,
+    target_height: int,
+) -> Optional[str]:
+    """
+    Normalize a landscape material to portrait orientation.
+
+    Returns the path to the reframed video, or None if reframing fails.
+    """
+    if not os.path.exists(video_path):
+        return None
+
+    # Check current orientation
+    try:
+        import subprocess
+        probe_cmd = [
+            utils.get_ffmpeg_binary().replace("ffmpeg", "ffprobe"),
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+            video_path,
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        if probe_result.returncode != 0:
+            return None
+
+        parts = probe_result.stdout.strip().split(",")
+        if len(parts) < 2:
+            return None
+
+        width = int(parts[0])
+        height = int(parts[1])
+
+        # Already portrait, no reframing needed
+        if height > width:
+            return video_path
+
+        # Check if reframing is possible
+        if not _can_reframe_to_portrait(width, height, target_width, target_height):
+            return None
+
+        # Reframe
+        output_path = video_path.replace(".mp4", "_portrait.mp4")
+        if _reframe_landscape_to_portrait(video_path, output_path, target_width, target_height):
+            return output_path
+
+    except Exception as exc:
+        logger.error(f"Material normalization error: {exc}")
+
+    return None
 
 
 def search_videos_pexels(
@@ -2309,8 +2522,22 @@ def download_videos_by_scene(
                 selected_provider = provider
                 used_asset_ids.add(asset_id)
 
+                # Reframe landscape to portrait if needed
+                if video_aspect == VideoAspect.portrait:
+                    aspect = VideoAspect(video_aspect)
+                    target_w, target_h = aspect.to_resolution()
+                    reframed_path = normalize_material_to_portrait(
+                        scene_clip, target_w, target_h
+                    )
+                    if reframed_path and reframed_path != scene_clip:
+                        logger.info(
+                            f"scene {scene_index}: reframed landscape to portrait: "
+                            f"{os.path.basename(reframed_path)}"
+                        )
+                        scene_clip = reframed_path
+
                 try:
-                    record = _material_source_record(item, saved_video_path)
+                    record = _material_source_record(item, scene_clip)
                 except Exception as source_error:
                     logger.warning(
                         f"failed to build material source record for scene "
@@ -2319,7 +2546,7 @@ def download_videos_by_scene(
                     )
                     record = {
                         "provider": getattr(item, "provider", provider) or provider,
-                        "local_file": Path(saved_video_path).name,
+                        "local_file": Path(scene_clip).name,
                         "duration": int(getattr(item, "duration", 0) or 0),
                     }
 

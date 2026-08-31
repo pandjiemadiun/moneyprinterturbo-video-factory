@@ -517,8 +517,8 @@ def get_bgm_file(bgm_type: str = "random", bgm_file: str = ""):
         try:
             resolved_bgm_file = bgm_service.resolve_bgm_file(bgm_file)
         except ValueError as exc:
-            # API 请求里的 bgm_file 来自用户输入，只允许解析到用户 BGM 或内置
-            # 歌曲目录，阻止 MoviePy 读取配置、密钥等任意服务器文件。
+            # API请求里的bgm_file来自用户输入，只允许解析到用户BGM或内置
+            # 歌曲目录，阻止MoviePy读取配置、密钥等任意服务器文件。
             logger.warning(
                 f"reject unsafe bgm file: {bgm_file}, error: {str(exc)}"
             )
@@ -527,12 +527,15 @@ def get_bgm_file(bgm_type: str = "random", bgm_file: str = ""):
 
     if bgm_type == "random":
         files = bgm_service.list_bgm_files()
-        # 当背景音乐目录为空时，直接回退为“不使用 BGM”，避免 random.choice([]) 抛异常。
+        # 当背景音乐目录为空时，直接回退为"不使用BGM"，避免random.choice([])抛异常。
         if not files:
             logger.warning("no background music files found")
             return ""
         return random.choice(files)
 
+    # AI-generated BGM (sonilo/elevenlabs) is handled in app.services.task
+    # via bgm_file_override mechanism before calling this function.
+    # This function only handles "random" and "custom" types.
     return ""
 
 
