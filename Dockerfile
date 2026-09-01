@@ -108,6 +108,19 @@ COPY . .
 # Expose the port the app runs on
 EXPOSE 8501
 
+# Immutable provenance. The canonical build (see docs/PRODUCTION_RUNTIME_CONTRACT.md
+# and scripts/verify_production.py) passes GIT_SHA == canonical repo HEAD so every
+# runtime image is traceable 1:1 to a committed source state. Leaving these blank
+# on purpose: verify_production.py FAIL CLOSED if the label is missing/empty.
+ARG GIT_SHA
+ARG GIT_COMMIT
+ARG BUILD_PHASE
+LABEL git-sha="${GIT_SHA}" \
+      git-commit="${GIT_COMMIT}" \
+      phase="${BUILD_PHASE}" \
+      repo="moneyprinterturbo-video-factory" \
+      canonical-webui="webui/Main.py"
+
 # 容器内部必须监听 0.0.0.0，宿主机仍通过 docker 端口映射限制为 127.0.0.1。
 # browser.serverAddress 只决定浏览器展示的访问地址，不能替代 server.address。
 CMD ["streamlit", "run", "./webui/Main.py", "--server.address=0.0.0.0", "--server.port=8501", "--browser.serverAddress=127.0.0.1", "--server.enableCORS=True", "--browser.gatherUsageStats=False", "--client.toolbarMode=minimal", "--logger.hideWelcomeMessage=True", "--server.showEmailPrompt=False"]

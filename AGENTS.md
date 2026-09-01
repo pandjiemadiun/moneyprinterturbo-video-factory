@@ -40,6 +40,27 @@ Before modifying UI, verify the target is:
 | Factory API | `/opt/mpt-factory/app/main.py` | 8000 (localhost) |
 | Factory DB | `/opt/mpt-factory/data/factory.db` | N/A |
 
+### `/opt/MoneyPrinterTurbo` is NOT canonical source
+
+`/opt/MoneyPrinterTurbo` is the **production data volume only**:
+`config.toml` and `storage/` (tasks.db, production MP4s) are bind-mounted from
+here into the canonical containers. It also happens to contain a *stale git
+checkout* (`bdbcdb5`) that is **not** what production is built from.
+
+**Do NOT edit `/opt/MoneyPrinterTurbo/webui/...` or `/opt/MoneyPrinterTurbo/app/...`
+as "the source."** Those edits are invisible to production (the running image is
+baked from `/root/moneyprinterturbo-video-factory`) and only re-create the
+source/data conflation that caused the "wrong address" bug.
+
+- Canonical source repository: `/root/moneyprinterturbo-video-factory`
+- Canonical build context: `/root/moneyprinterturbo-video-factory` ONLY.
+- Data volume (do not delete, do not treat as source): `/opt/MoneyPrinterTurbo`
+
+See `docs/PRODUCTION_RUNTIME_CONTRACT.md` and verify with
+`python3 scripts/verify_production.py` before every deploy.
+
+## Permanent Deployment Contract
+
 ## Source Code of Truth
 
 | Concern | Canonical Location |
