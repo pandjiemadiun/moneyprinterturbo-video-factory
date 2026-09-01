@@ -11,6 +11,7 @@ from app.controllers import base
 from app.controllers.v1.base import new_router
 from app.models.schema import (
     ContentFactoryProduceRequest,
+    ContentFactoryProduceResponseData,
     ContentFactoryResponse,
 )
 from app.services.content_factory import (
@@ -66,21 +67,26 @@ async def produce_video(
 def _build_assessment_from_request(body: Any) -> Any:
     """Reconstruct an assessment-like object from the request.
 
-    This avoids requiring the full VisualOpportunityAssessment object
-    to cross the API boundary. Only the fields needed for production
-    are required.
+    The visual gate status is computed server-side from the scores.
+    The frontend CANNOT bypass the gate by sending a fake status.
     """
     from app.services.visual_opportunity.models import (
         VisualConcept,
         VisualFeasibilityStatus,
         VisualFeasibilityScore,
         VisualOpportunityAssessment,
-        ProviderAvailability,
+    )
+
+    # Compute gate status server-side from scores.
+    # This prevents the frontend from bypassing the gate.
+    status = _compute_gate_status(
+        visual_feasibility_score=body.visual_feasibility_score,
+        relevance_confidence=body.relevance_confidence,
     )
 
     assessment = VisualOpportunityAssessment(
         topic=body.topic,
-        status=VisualFeasibilityStatus.VISUALLY_PRODUCIBLE,
+        status=status,
     )
 
     # Reconstruct concepts.
@@ -103,3 +109,23 @@ def _build_assessment_from_request(body: Any) -> Any:
     assessment.relevance_confidence = body.relevance_confidence
 
     return assessment
+
+
+def _compute_gate_status(
+    visual_feasibility_score: float,
+    relevance_confidence: float,
+) -> Any:
+    """Compute the visual gate status from scores.
+
+    Mirrors the thresholds used in the Phase 12 scorer.
+    """
+    from app.services.visual_opportunity.models import VisualFeasibilityStatus
+
+    # PRODUCIBLE requires both sufficient score AND relevance.
+    if visual_feasibility_score >= 0.6 and relevance_confidence >= 0.35:
+        return VisualFeasibilityStatus.VISUALLY_PRODUCIBLE
+    elif visual_feasibility_score >= 0.3 and relevance_confidence >= 0.2:
+        return VisualFeasibilityStatus.VISUALLY_LIMITED
+    elif visual_feasibility_score > 0:
+        return VisualFeasibilityStatus.NOT_VISUALLY_PRODUCIBLE
+    return VisualFeasibilityStatus.CHECK_FAILED

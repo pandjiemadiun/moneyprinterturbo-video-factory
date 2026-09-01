@@ -264,7 +264,7 @@ class ContentFactory:
         Uses the deterministic spec ID to find existing tasks.
         """
         from app.models import const
-        from app.services.state import sm
+        from app.services import state as sm
 
         # Search recent tasks for matching spec ID in params.
         try:
@@ -292,8 +292,7 @@ class ContentFactory:
         """
         from app import models
         from app.config import config
-        from app.services import utils as service_utils
-        from app.services.state import sm
+        from app.services import state as sm
         from app.services.task import start
 
         # Build VideoParams from specification.
