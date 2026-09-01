@@ -629,3 +629,96 @@ class ContentIntelligenceResponseData(BaseModel):
 
 class ContentIntelligenceResponse(BaseResponse):
     data: ContentIntelligenceResponseData
+
+
+# ---------------------------
+# ----- VISUAL OPPORTUNITY -----
+# ---------------------------
+class VisualOpportunityRequest(BaseModel):
+    """Request to assess visual feasibility for topics."""
+
+    topics: list[str] = Field(
+        default_factory=list,
+        description="List of topics to assess for visual feasibility",
+    )
+    category: str = Field(
+        default="general",
+        description="Content category for visual query expansion",
+    )
+    providers: list[str] = Field(
+        default_factory=lambda: ["pexels", "pixabay", "coverr"],
+        description="Providers to probe",
+    )
+    max_queries_per_topic: int = Field(
+        default=6, ge=1, le=15,
+        description="Max visual queries generated per topic",
+    )
+    force_refresh: bool = Field(
+        default=False,
+        description="Bypass cache and perform fresh provider checks",
+    )
+
+
+class ProviderAvailabilitySchema(BaseModel):
+    provider: str = ""
+    query: str = ""
+    status: str = "OK"
+    error_message: str = ""
+    raw_count: int = 0
+    usable_count: int = 0
+    native_portrait_count: int = 0
+    reframable_landscape_count: int = 0
+    rejected_count: int = 0
+    rejection_reasons: dict[str, int] = Field(default_factory=dict)
+    sample_source_urls: list[str] = Field(default_factory=list)
+    checked_at: str = ""
+    is_cached: bool = False
+    response_time_ms: float = 0.0
+
+
+class VisualFeasibilityScoreSchema(BaseModel):
+    total: float = 0.0
+    quantity_score: float = 0.0
+    provider_diversity_score: float = 0.0
+    portrait_readiness_score: float = 0.0
+    resolution_sufficiency_score: float = 0.0
+    scene_diversity_score: float = 0.0
+    provider_health_score: float = 0.0
+    explanation: str = ""
+    component_weights: dict[str, float] = Field(default_factory=dict)
+    scored_at: str = ""
+
+
+class VisualOpportunityAssessmentSchema(BaseModel):
+    assessment_id: str = ""
+    topic: str = ""
+    status: str = "CHECK_FAILED"
+    feasibility_score: VisualFeasibilityScoreSchema = Field(
+        default_factory=VisualFeasibilityScoreSchema
+    )
+    concepts: list[str] = Field(default_factory=list)
+    provider_availability: list[ProviderAvailabilitySchema] = Field(
+        default_factory=list
+    )
+    total_usable: int = 0
+    total_native_portrait: int = 0
+    total_reframable_landscape: int = 0
+    total_rejected: int = 0
+    concepts_with_material: int = 0
+    concepts_without_material: int = 0
+    provider_health: dict[str, str] = Field(default_factory=dict)
+    checked_at: str = ""
+    is_cached: bool = False
+
+
+class VisualOpportunityResponseData(BaseModel):
+    assessments: list[VisualOpportunityAssessmentSchema] = Field(
+        default_factory=list
+    )
+    success: bool = True
+    errors: list[str] = Field(default_factory=list)
+    checked_at: str = ""
+
+
+class VisualOpportunityResponse(BaseResponse):
+    data: VisualOpportunityResponseData

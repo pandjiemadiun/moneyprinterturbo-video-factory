@@ -256,3 +256,31 @@ def api_content_intelligence_hypotheses(
     except Exception as exc:
         logger.error(f"api_content_intelligence_hypotheses failed: {exc}")
         return {"success": False, "message": str(exc)}
+
+
+def api_visual_opportunity_analyze(
+    topics: list[str] | None = None,
+    category: str = "general",
+    providers: list[str] | None = None,
+    max_queries_per_topic: int = 6,
+    force_refresh: bool = False,
+) -> dict:
+    """Assess visual feasibility for topics via API."""
+    base_url = _get_api_base_url()
+    try:
+        resp = httpx.post(
+            f"{base_url}/api/v1/visual-opportunity/analyze",
+            json={
+                "topics": topics or [],
+                "category": category,
+                "providers": providers or ["pexels", "pixabay", "coverr"],
+                "max_queries_per_topic": max_queries_per_topic,
+                "force_refresh": force_refresh,
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return resp.json().get("data", {})
+    except Exception as exc:
+        logger.error(f"api_visual_opportunity_analyze failed: {exc}")
+        return {"success": False, "message": str(exc)}

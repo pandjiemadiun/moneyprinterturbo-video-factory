@@ -529,6 +529,9 @@ def _initialize_session_state():
         "loomloom_video_client_request_id": "",
         "loomloom_video_confirm_charge": False,
         "wavespeed_confirm_charge": False,
+        # Visual Opportunity Engine state
+        "vo_result": None,
+        "vo_show_text_input": False,
         # AI 视频按素材段计费，默认只生成一段，用户确认效果后再主动增加数量。
         "loomloom_video_scene_count": _saved_ui_number(
             "loomloom_video_scene_count",
@@ -5951,8 +5954,29 @@ def _render_application():
         _render_create_view()
 
 
+def _consume_prefill_values():
+    """Transfer prefill values from VO/CI into widget state keys.
+
+    The Visual Opportunity Engine and CI hypothesis dialog store values
+    in ``prefill_*`` keys. This copies them into the actual widget keys
+    so the Create form renders them, then clears the prefill keys.
+    """
+    prefill_map = {
+        "prefill_video_subject": "video_subject",
+        "prefill_script_prompt": "video_script_prompt",
+        "prefill_video_keywords": "video_terms",
+    }
+    for prefill_key, widget_key in prefill_map.items():
+        if prefill_key in st.session_state and st.session_state[prefill_key]:
+            st.session_state[widget_key] = st.session_state[prefill_key]
+            st.session_state[prefill_key] = ""
+
+
 def _render_create_view():
     """渲染创建视频的主表单视图。"""
+    # Consume prefill values from Visual Opportunity / CI hypothesis
+    _consume_prefill_values()
+
     with st.container(key="main_settings_grid"):
         panel = st.columns(4)
     left_panel = panel[0]
@@ -6730,5 +6754,319 @@ def _render_content_intelligence_view():
     if not trends and not opportunities and not hypotheses and not patterns:
         st.info("No results. Try adjusting the controls or fetching live data.")
 
+    # ------------------------------------------------------------------
+    # VISUAL OPPORTUNITY ENGINE
+    # ------------------------------------------------------------------
+    _render_visual_opportunity_engine(category)
 
-_render_application()
+
+def _render_visual_opportunity_engine(category: str = "general"):
+    """Render the Visual Opportunity Engine section.
+
+    Assesses whether discovered topics are visually producible using
+    the configured stock-footage providers (Pexels, Pixabay, Coverr).
+    """
+    st.divider()
+    st.markdown(
+        "<h2 style='margin-bottom: 0;'>Visual Opportunity Engine</h2>"
+        "<p style='color: #666; margin-top: 0;'>"
+        "Discover topics that are both interesting/trending AND visually "
+        "producible with your available footage providers.</p>",
+        unsafe_allow_html=True,
+    )
+
+    # Controls
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        vo_category = st.selectbox(
+            "VO Category",
+            options=["general", "technology", "business", "sports", "entertainment", "health", "science"],
+            index=0,
+            key="vo_category",
+        )
+    with col2:
+        vo_source = st.selectbox(
+            "Topic Source",
+            options=["From CI Hypotheses", "Custom Topics"],
+            index=0,
+            key="vo_source",
+        )
+    with col3:
+        vo_filter = st.selectbox(
+            "Filter",
+            options=["All", "Visually Producible", "Visually Limited", "Not Producible"],
+            index=0,
+            key="vo_filter",
+        )
+
+    # Action buttons
+    bcol1, bcol2 = st.columns(2)
+    with bcol1:
+        vo_analyze_clicked = st.button(
+            "🔍 Analyze Visual Feasibility",
+            key="vo_analyze_btn",
+            type="primary",
+            use_container_width=True,
+        )
+    with bcol2:
+        vo_refresh_clicked = st.button(
+            "🔃 Refresh Visual Check",
+            key="vo_refresh_btn",
+            use_container_width=True,
+        )
+
+    # Custom topics input
+    if st.session_state.get("vo_show_text_input"):
+        custom_topics = st.text_area(
+            "Enter topics to assess (one per line)",
+            height=100,
+            key="vo_custom_topics",
+            placeholder="Top 5 Mountains for Beginnings\nMorning Running Benefits\nHealthy Breakfast Ideas",
+        )
+        if st.button("Analyze These Topics", key="vo_analyze_custom_btn", type="primary"):
+            topics = [t.strip() for t in custom_topics.split("\n") if t.strip()]
+            if topics:
+                with st.spinner("Probing Pexels, Pixabay, Coverr for visual footage..."):
+                    result = webui_api_client.api_visual_opportunity_analyze(
+                        topics=topics,
+                        category=vo_category,
+                    )
+                st.session_state["vo_result"] = result
+                st.session_state["vo_show_text_input"] = False
+                st.rerun()
+
+    # Handle source toggle
+    if vo_source == "Custom Topics" and not st.session_state.get("vo_show_text_input"):
+        st.session_state["vo_show_text_input"] = True
+        st.rerun()
+
+    # Handle analyze button
+    if vo_analyze_clicked:
+        st.session_state["vo_show_text_input"] = False
+        # Get topics from CI hypotheses
+        ci_result = st.session_state.get("ci_result", {})
+        hypotheses = ci_result.get("hypotheses", []) if isinstance(ci_result, dict) else []
+        topics = [h.get("topic", "") for h in hypotheses if h.get("topic")]
+        if not topics:
+            st.session_state["vo_result"] = {
+                "success": False,
+                "message": "No hypotheses available. Run 'Fetch Live Trends' first.",
+            }
+            st.rerun()
+        with st.spinner(f"Assessing visual feasibility for {len(topics)} topics against Pexels, Pixabay, Coverr..."):
+            try:
+                result = webui_api_client.api_visual_opportunity_analyze(
+                    topics=topics,
+                    category=category,
+                )
+                st.session_state["vo_result"] = result
+            except Exception as e:
+                st.session_state["vo_result"] = {
+                    "success": False,
+                    "message": f"Network error: {str(e)}",
+                }
+        st.rerun()
+
+    # Handle refresh button
+    if vo_refresh_clicked:
+        st.session_state["vo_show_text_input"] = False
+        ci_result = st.session_state.get("ci_result", {})
+        hypotheses = ci_result.get("hypotheses", []) if isinstance(ci_result, dict) else []
+        topics = [h.get("topic", "") for h in hypotheses if h.get("topic")]
+        if topics:
+            with st.spinner("Refreshing visual feasibility (bypassing cache)..."):
+                try:
+                    result = webui_api_client.api_visual_opportunity_analyze(
+                        topics=topics,
+                        category=category,
+                        force_refresh=True,
+                    )
+                    st.session_state["vo_result"] = result
+                except Exception as e:
+                    st.session_state["vo_result"] = {
+                        "success": False,
+                        "message": f"Network error: {str(e)}",
+                    }
+        st.rerun()
+
+    # Display results
+    result = st.session_state.get("vo_result")
+    if result is None:
+        st.info(
+            "Click 'Analyze Visual Feasibility' to check whether discovered topics "
+            "can be produced with your configured footage providers."
+        )
+        return
+
+    if not result.get("success", True):
+        st.error(f"Visual analysis failed: {result.get('message', 'Unknown error')}")
+        return
+
+    errors = result.get("errors", [])
+    if errors:
+        for error in errors:
+            st.warning(f"⚠️ {error}")
+
+    assessments = result.get("assessments", [])
+    if not assessments:
+        st.info("No assessments available. Run Content Intelligence first to generate topics.")
+        return
+
+    # Apply filter
+    _display_visual_assessments(assessments, vo_filter)
+
+
+def _display_visual_assessments(assessments: list, filter_option: str):
+    """Display visual opportunity assessments with evidence."""
+
+    # Apply filter
+    if filter_option == "Visually Producible":
+        assessments = [a for a in assessments if a.get("status") == "VISUALLY_PRODUCIBLE"]
+    elif filter_option == "Visually Limited":
+        assessments = [a for a in assessments if a.get("status") == "VISUALLY_LIMITED"]
+    elif filter_option == "Not Producible":
+        assessments = [a for a in assessments if a.get("status") == "NOT_VISUALLY_PRODUCIBLE"]
+
+    if not assessments:
+        st.info(f"No assessments match the filter: {filter_option}")
+        return
+
+    # Summary metrics
+    producible = sum(1 for a in assessments if a.get("status") == "VISUALLY_PRODUCIBLE")
+    limited = sum(1 for a in assessments if a.get("status") == "VISUALLY_LIMITED")
+    not_producible = sum(1 for a in assessments if a.get("status") == "NOT_VISUALLY_PRODUCIBLE")
+
+    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+    with mcol1:
+        st.metric("Total", len(assessments))
+    with mcol2:
+        st.metric("✅ Producible", producible)
+    with mcol3:
+        st.metric("⚠️ Limited", limited)
+    with mcol4:
+        st.metric("❌ Not Producible", not_producible)
+
+    st.divider()
+
+    # Individual assessments
+    for i, assessment in enumerate(assessments):
+        _render_single_visual_assessment(assessment, i)
+
+
+def _render_single_visual_assessment(assessment: dict, index: int):
+    """Render a single visual opportunity assessment."""
+    topic = assessment.get("topic", "Unknown")
+    status = assessment.get("status", "CHECK_FAILED")
+    score = assessment.get("feasibility_score", {})
+    total_score = score.get("total", 0) * 100
+
+    # Status icon
+    status_icon = {
+        "VISUALLY_PRODUCIBLE": "✅",
+        "VISUALLY_LIMITED": "⚠️",
+        "NOT_VISUALLY_PRODUCIBLE": "❌",
+        "CHECK_FAILED": "🔴",
+    }.get(status, "⚪")
+
+    with st.container(border=True):
+        # Header row
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown(f"**{topic}**")
+        with col2:
+            st.markdown(f"{status_icon} **{status.replace('_', ' ')}**")
+
+        # Score bar
+        st.progress(total_score / 100, text=f"Visual Feasibility: {total_score:.0f}/100")
+
+        # Score explanation
+        explanation = score.get("explanation", "")
+        if explanation:
+            st.caption(explanation)
+
+        # Provider evidence
+        provider_avail = assessment.get("provider_availability", [])
+        if provider_avail:
+            st.markdown("**Provider Evidence:**")
+            pcols = st.columns(len(provider_avail))
+            for j, pa in enumerate(provider_avail):
+                with pcols[j]:
+                    prov = pa.get("provider", "?")
+                    pstatus = pa.get("status", "OK")
+                    usable = pa.get("usable_count", 0)
+                    portrait = pa.get("native_portrait_count", 0)
+                    reframe = pa.get("reframable_landscape_count", 0)
+                    raw = pa.get("raw_count", 0)
+
+                    if pstatus == "OK":
+                        st.markdown(f"**{prov}** ✓")
+                        st.caption(f"{usable} usable (of {raw})")
+                        st.caption(f"{portrait} portrait")
+                        st.caption(f"{reframe} reframe")
+                    elif pstatus == "NOT_CONFIGURED":
+                        st.markdown(f"**{prov}** ⚪")
+                        st.caption("Not configured")
+                    else:
+                        st.markdown(f"**{prov}** 🔴")
+                        st.caption(f"{pstatus}: {pa.get('error_message', '')[:50]}")
+
+        # Totals row
+        tcol1, tcol2, tcol3, tcol4 = st.columns(4)
+        with tcol1:
+            st.caption(f"Usable: {assessment.get('total_usable', 0)}")
+        with tcol2:
+            st.caption(f"Portrait: {assessment.get('total_native_portrait', 0)}")
+        with tcol3:
+            st.caption(f"Reframable: {assessment.get('total_reframable_landscape', 0)}")
+        with tcol4:
+            st.caption(f"Concepts covered: {assessment.get('concepts_with_material', 0)}/{assessment.get('concepts_with_material', 0) + assessment.get('concepts_without_material', 0)}")
+
+        # Visual concepts
+        concepts = assessment.get("concepts", [])
+        if concepts:
+            with st.expander("Visual Concepts", expanded=False):
+                st.caption(", ".join(concepts))
+
+        # Source links
+        sample_urls = []
+        for pa in provider_avail:
+            for url in pa.get("sample_source_urls", []):
+                if url and url not in sample_urls:
+                    sample_urls.append(url)
+        if sample_urls:
+            with st.expander("Sample Sources", expanded=False):
+                for url in sample_urls[:5]:
+                    st.link_button("🔗 Source", url=url, help=url[:80])
+
+        # Score breakdown
+        if score:
+            with st.expander("Score Breakdown", expanded=False):
+                components = [
+                    ("Quantity", score.get("quantity_score", 0)),
+                    ("Provider Diversity", score.get("provider_diversity_score", 0)),
+                    ("Portrait Readiness", score.get("portrait_readiness_score", 0)),
+                    ("Resolution", score.get("resolution_sufficiency_score", 0)),
+                    ("Scene Diversity", score.get("scene_diversity_score", 0)),
+                    ("Provider Health", score.get("provider_health_score", 0)),
+                ]
+                for name, val in components:
+                    st.progress(val, text=f"{name}: {val:.2f}")
+
+        # Create Video button — only for producible
+        if status == "VISUALLY_PRODUCIBLE":
+            if st.button(
+                "🎬 Create Video",
+                key=f"vo_create_video_{index}",
+                type="primary",
+                help="Create a video for this topic",
+            ):
+                st.session_state["prefill_video_subject"] = topic
+                st.session_state["prefill_script_prompt"] = f"Topic: {topic}. Create an engaging short-form video."
+                st.session_state["prefill_video_keywords"] = ", ".join(concepts[:5]) if concepts else topic
+                st.session_state["nav_view"] = "create"
+                st.success(f"Switching to Create Video with topic: {topic}")
+                st.rerun()
+        else:
+            st.caption("🔒 Create Video available only for VISUALLY_PRODUCIBLE topics")
+
+    st.divider()
