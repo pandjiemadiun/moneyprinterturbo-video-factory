@@ -1,3 +1,4 @@
+/* ── Global resets ───────────────────────────────────────────────────────── */
 header[data-testid="stHeader"],
 div[data-testid="stToolbar"],
 div[data-testid="stDecoration"],
@@ -17,17 +18,18 @@ h1 {
     margin-top: 0 !important;
 }
 
+/* ── Theme ───────────────────────────────────────────────────────────────── */
 .stApp {
     background: #0f0f14 !important;
     color: #e0e0e0 !important;
 }
 
-/* 主导航样式 */
+/* ── Layout ──────────────────────────────────────────────────────────────── */
 [data-testid="stHorizontalBlock"] {
     flex-wrap: wrap !important;
 }
 
-/* 按钮样式统一 */
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
 button[data-testid="stBaseButton-primary"] {
     background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
     border: none !important;
@@ -47,12 +49,12 @@ button[data-testid="stBaseButton-secondary"] {
     min-height: 2.75rem !important;
 }
 
-/* 卡片容器 */
+/* ── Cards & containers ──────────────────────────────────────────────────── */
 div[data-testid="element-container"] {
     border-radius: 8px !important;
 }
 
-/* 输入框样式 */
+/* ── Inputs ──────────────────────────────────────────────────────────────── */
 input[type="text"],
 input[type="number"],
 textarea,
@@ -63,7 +65,7 @@ div[data-testid="stTextInput"] > div > div > input {
     background: #1a1a24 !important;
 }
 
-/* 标签页样式 */
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
 div[data-testid="stTabs"] button {
     border-radius: 6px 6px 0 0 !important;
     font-weight: 500 !important;
@@ -76,19 +78,19 @@ div[data-testid="stTabs"] button[aria-selected="true"] {
     border-bottom: 2px solid #8b5cf6 !important;
 }
 
-/* 分段控制器 */
+/* ── Segmented control ───────────────────────────────────────────────────── */
 div[data-testid="stSegmentControl"] button,
 div[data-testid="stSegmentedControl"] button {
     border-radius: 6px !important;
 }
 
-/* 进度条 */
+/* ── Progress bar ────────────────────────────────────────────────────────── */
 div[data-testid="stProgressBar"] > div > div {
     background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%) !important;
     border-radius: 4px !important;
 }
 
-/* 表格样式 */
+/* ── Table ───────────────────────────────────────────────────────────────── */
 div[data-testid="stTable"] table {
     border-collapse: separate !important;
     border-spacing: 0 !important;
@@ -109,88 +111,44 @@ div[data-testid="stTable"] td {
     border-bottom: 1px solid #1a1a24 !important;
 }
 
-/* 信息框 */
+/* ── Alerts ──────────────────────────────────────────────────────────────── */
 div[data-testid="stAlert"] {
     border-radius: 8px !important;
     border-left: 3px solid #6366f1 !important;
 }
 
-/* Selectbox */
+/* ── Selectbox ───────────────────────────────────────────────────────────── */
 div[data-baseweb="select"] > div {
     border-radius: 6px !important;
     border: 1px solid #2a2a3a !important;
     background: #1a1a24 !important;
 }
 
-/* Number input */
+/* ── Number input ────────────────────────────────────────────────────────── */
 input[type="number"] {
     border-radius: 6px !important;
 }
 
-/* Checkbox */
+/* ── Checkbox ────────────────────────────────────────────────────────────── */
 label[data-testid="stCheckbox"] span {
     font-size: 0.9rem !important;
 }
 
-/* 顶部栏布局 */
-div[class*="st-key-top_bar"] {
-    background: #13131a !important;
-    border-bottom: 1px solid #1e1e2e !important;
-    padding: 0.5rem 1rem !important;
-    margin: -0.5rem -1rem 0.5rem -1rem !important;
+/* ── Brand ───────────────────────────────────────────────────────────────── */
+.mpt-brand {
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    color: #e0e0e0 !important;
+    letter-spacing: -0.025em !important;
 }
 
-div[class*="st-key-top_bar"] > div[data-testid="stHorizontalBlock"] {
-    flex-wrap: nowrap !important;
-    gap: 0.5rem !important;
+.mpt-brand__version {
+    font-size: 0.75rem !important;
+    color: #64748b !important;
+    font-weight: 400 !important;
 }
 
-/* 导航按钮 */
-div[class*="st-key-top_bar"] button[data-testid="stBaseButton-secondary"] {
-    min-height: 2.25rem !important;
-    padding: 0.25rem 0.75rem !important;
-    font-size: 0.85rem !important;
-}
-
-/* 主设置网格 */
-div[class*="st-key-main_settings_grid"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"] {
-    flex-wrap: wrap !important;
-    gap: 1rem !important;
-}
-
-div[class*="st-key-main_settings_grid"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"]
-    > div[data-testid="stColumn"] {
-    flex: 1 1 calc(50% - 0.5rem) !important;
-    width: calc(50% - 0.5rem) !important;
-    min-width: calc(50% - 0.5rem) !important;
-}
-
-/* 视频卡片 */
-div[class*="st-key-vid_card_"] {
-    background: #1a1a24 !important;
-    border: 1px solid #2a2a3a !important;
-    border-radius: 10px !important;
-    padding: 0.75rem !important;
-    margin-bottom: 0.75rem !important;
-    transition: border-color 0.2s ease !important;
-}
-
-div[class*="st-key-vid_card_"]:hover {
-    border-color: #6366f1 !important;
-}
-
-/* 缩略图容器 */
-div[class*="st-key-vid_card_"] img {
-    border-radius: 6px !important;
-    background: #0f0f14 !important;
-    object-fit: cover !important;
-}
-
-/* 任务状态标签 */
+/* ── Status badges ───────────────────────────────────────────────────────── */
 .status-complete {
     color: #34d399 !important;
     font-weight: 600 !important;
@@ -211,7 +169,12 @@ div[class*="st-key-vid_card_"] img {
     font-weight: 600 !important;
 }
 
-/* 空状态 */
+.status-cancelled {
+    color: #94a3b8 !important;
+    font-weight: 600 !important;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
 .empty-state {
     text-align: center !important;
     padding: 3rem 1rem !important;
@@ -224,7 +187,7 @@ div[class*="st-key-vid_card_"] img {
     opacity: 0.5 !important;
 }
 
-/* 加载状态 */
+/* ── Loading shimmer ─────────────────────────────────────────────────────── */
 @keyframes shimmer {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
@@ -237,61 +200,7 @@ div[class*="st-key-vid_card_"] img {
     border-radius: 8px !important;
 }
 
-/* 响应式：小屏手机 */
-@media (max-width: 480px) {
-    div[class*="st-key-main_settings_grid"]
-        > div[data-testid="stLayoutWrapper"]
-        > div[data-testid="stHorizontalBlock"]
-        > div[data-testid="stColumn"] {
-        flex: 1 1 100% !important;
-        width: 100% !important;
-        min-width: 100% !important;
-    }
-
-    .mpt-brand {
-        font-size: 1.25rem !important;
-    }
-
-    .mpt-brand__version {
-        font-size: 0.7rem !important;
-    }
-
-    section[data-testid="stTabs"] button {
-        font-size: 0.75rem !important;
-        padding: 0 0.4rem !important;
-    }
-
-    button[data-testid="stBaseButton-secondary"],
-    button[data-testid="stBaseButton-primary"] {
-        min-height: 2.5rem !important;
-        font-size: 0.8rem !important;
-    }
-
-    /* 顶部栏在小屏下垂直堆叠 */
-    div[class*="st-key-top_bar"] > div[data-testid="stHorizontalBlock"] {
-        flex-wrap: wrap !important;
-        gap: 0.25rem !important;
-    }
-
-    /* 视频卡片在小屏下单列 */
-    div[class*="st-key-vid_card_"] {
-        margin-bottom: 0.5rem !important;
-    }
-}
-
-/* 响应式：平板 */
-@media (min-width: 481px) and (max-width: 768px) {
-    div[class*="st-key-main_settings_grid"]
-        > div[data-testid="stLayoutWrapper"]
-        > div[data-testid="stHorizontalBlock"]
-        > div[data-testid="stColumn"] {
-        flex: 1 1 calc(50% - 0.5rem) !important;
-        width: calc(50% - 0.5rem) !important;
-        min-width: calc(50% - 0.5rem) !important;
-    }
-}
-
-/* 滚动条样式 */
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
     width: 6px !important;
     height: 6px !important;
@@ -310,110 +219,40 @@ div[class*="st-key-vid_card_"] img {
     background: #3a3a4a !important;
 }
 
-/* 工具提示 */
+/* ── Tooltip ─────────────────────────────────────────────────────────────── */
 [data-testid="stTooltipIcon"] {
     color: #6366f1 !important;
 }
 
-/* 品牌样式 */
-.mpt-brand {
-    font-size: 1.5rem !important;
-    font-weight: 700 !important;
-    color: #e0e0e0 !important;
-    letter-spacing: -0.025em !important;
-}
-
-.mpt-brand__version {
-    font-size: 0.75rem !important;
-    color: #64748b !important;
-    font-weight: 400 !important;
-}
-
-/* 分段控制器选中状态 */
+/* ── Segment button ──────────────────────────────────────────────────────── */
 button[data-testid="stBaseButton-secondary"][kind="segment"] {
     border-radius: 6px !important;
     margin: 0 2px !important;
 }
 
-/* 任务行（移动端卡片视图） */
-div[class*="st-key-task_row_"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"] {
-    display: grid !important;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
-    gap: 0.2rem 0.5rem !important;
-    align-items: center !important;
+/* ── Responsive: mobile ──────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+    .mpt-brand {
+        font-size: 1.25rem !important;
+    }
+
+    .mpt-brand__version {
+        font-size: 0.7rem !important;
+    }
+
+    section[data-testid="stTabs"] button {
+        font-size: 0.75rem !important;
+        padding: 0 0.4rem !important;
+    }
+
+    button[data-testid="stBaseButton-secondary"],
+    button[data-testid="stBaseButton-primary"] {
+        min-height: 2.5rem !important;
+        font-size: 0.8rem !important;
+    }
 }
 
-div[class*="st-key-task_row_"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"]
-    > div[data-testid="stColumn"] {
-    width: auto !important;
-    min-width: 0 !important;
-}
-
-div[class*="st-key-task_row_"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"]
-    > div[data-testid="stColumn"]:nth-child(1) {
-    grid-column: 1;
-    grid-row: 2;
-}
-
-div[class*="st-key-task_row_"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"]
-    > div[data-testid="stColumn"]:nth-child(2) {
-    grid-column: 2;
-    grid-row: 2;
-}
-
-div[class*="st-key-task_row_"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"]
-    > div[data-testid="stColumn"]:nth-child(3) {
-    grid-column: 1;
-    grid-row: 1;
-}
-
-div[class*="st-key-task_row_"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"]
-    > div[data-testid="stColumn"]:nth-child(4) {
-    grid-column: 3;
-    grid-row: 2;
-}
-
-div[class*="st-key-task_row_"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"]
-    > div[data-testid="stColumn"]:nth-child(5) {
-    grid-column: 4;
-    grid-row: 1 / 3;
-}
-
-div[class*="st-key-task_row_"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"]
-    > div[data-testid="stColumn"]:nth-child(5)
-    div[data-testid="stHorizontalBlock"] {
-    display: flex !important;
-    flex-direction: row !important;
-    gap: 0.15rem !important;
-}
-
-div[class*="st-key-task_row_"]
-    > div[data-testid="stLayoutWrapper"]
-    > div[data-testid="stHorizontalBlock"]
-    > div[data-testid="stColumn"]:nth-child(5)
-    div[data-testid="stColumn"] {
-    flex: 1 1 0 !important;
-    width: auto !important;
-    min-width: 1.75rem !important;
-}
-
-/* 导航控件在小屏下自动换行 */
-div:has(> [data-testid="stMarkdown"] > p) {
-    flex-wrap: wrap !important;
+/* ── Responsive: tablet ──────────────────────────────────────────────────── */
+@media (min-width: 481px) and (max-width: 768px) {
+    /* Tablet-specific adjustments */
 }
