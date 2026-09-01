@@ -11,14 +11,15 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
+from app.models.llm_provider import get_llm_provider, LLM_PROVIDER_REGISTRY, DEFAULT_LLM_PROVIDER_ID
+
 from webui.shared import (
     tr, get_all_fonts, get_all_songs, stable_selectbox, stable_segmented_control,
     _set_runtime_config, _save_runtime_config, _delete_runtime_config,
     _saved_ui_choice, _saved_ui_number, _saved_ui_bool, _saved_ui_color, _saved_ui_text,
     _run_llm_read_operation, _detect_audio_mime,
     _parse_chatterbox_voices, _sync_chatterbox_config_from_session_state,
-    _get_material_api_keys, _save_material_api_keys,
-    _effective_loomloom_api_token,
+    get_material_api_keys, save_material_api_keys,
     _build_key_backup_payload, _count_backup_keys, _collect_key_backup,
     _load_transfer_payload, _parse_key_backup, _build_settings_preset_payload,
     _parse_settings_preset, _apply_key_backup, _apply_restored_params,
@@ -30,7 +31,6 @@ from webui.shared import (
     DEFAULT_VIDEO_CODEC_OPTION, DEFAULT_SUBTITLE_SETTINGS,
     LOCAL_MATERIAL_EXTENSIONS, CUSTOM_AUDIO_EXTENSIONS,
     VideoAspect, VideoConcatMode, VideoTransitionMode,
-    LLM_PROVIDER_REGISTRY, DEFAULT_LLM_PROVIDER_ID,
     SETTINGS_PRESET_SCHEMA, SETTINGS_PRESET_VERSION, SETTINGS_PRESET_FILE_NAME,
     KEY_BACKUP_SCHEMA, KEY_BACKUP_VERSION, KEY_BACKUP_FILE_NAME,
     PRESET_EXCLUDED_PARAM_KEYS, _RUNTIME_CONFIG_SECTIONS,
