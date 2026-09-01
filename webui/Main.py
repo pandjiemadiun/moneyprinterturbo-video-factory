@@ -6843,10 +6843,10 @@ def _render_visual_opportunity_engine(category: str = "general"):
     # Handle analyze button
     if vo_analyze_clicked:
         st.session_state["vo_show_text_input"] = False
-        # Get topics from CI hypotheses
+        # Get topics from CI hypotheses (limit to top 5 to avoid timeouts)
         ci_result = st.session_state.get("ci_result", {})
         hypotheses = ci_result.get("hypotheses", []) if isinstance(ci_result, dict) else []
-        topics = [h.get("topic", "") for h in hypotheses if h.get("topic")]
+        topics = [h.get("topic", "") for h in hypotheses if h.get("topic")][:5]
         if not topics:
             st.session_state["vo_result"] = {
                 "success": False,
@@ -6872,7 +6872,7 @@ def _render_visual_opportunity_engine(category: str = "general"):
         st.session_state["vo_show_text_input"] = False
         ci_result = st.session_state.get("ci_result", {})
         hypotheses = ci_result.get("hypotheses", []) if isinstance(ci_result, dict) else []
-        topics = [h.get("topic", "") for h in hypotheses if h.get("topic")]
+        topics = [h.get("topic", "") for h in hypotheses if h.get("topic")][:5]
         if topics:
             with st.spinner("Refreshing visual feasibility (bypassing cache)..."):
                 try:

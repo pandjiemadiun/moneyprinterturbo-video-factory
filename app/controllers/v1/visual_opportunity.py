@@ -91,9 +91,12 @@ async def analyze_visual_opportunity(
     assessments: list[VisualOpportunityAssessmentSchema] = []
 
     try:
+        # Cap the number of topics to assess to avoid provider hammering
+        # and API timeouts. 5 topics is a reasonable default for a single request.
+        max_assess = min(len(body.topics), 8) if body.topics else 5
         engine = create_visual_opportunity_engine(
             providers=body.providers,
-            max_opportunities=len(body.topics) if body.topics else 5,
+            max_opportunities=max_assess,
         )
         engine.max_queries_per_topic = body.max_queries_per_topic
 

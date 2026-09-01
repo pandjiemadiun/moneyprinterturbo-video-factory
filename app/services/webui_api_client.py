@@ -277,7 +277,7 @@ def api_visual_opportunity_analyze(
                 "max_queries_per_topic": max_queries_per_topic,
                 "force_refresh": force_refresh,
             },
-            timeout=120,
+            timeout=180,
         )
         resp.raise_for_status()
         return resp.json().get("data", {})
