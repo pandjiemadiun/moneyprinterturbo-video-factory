@@ -7070,3 +7070,11 @@ def _render_single_visual_assessment(assessment: dict, index: int):
             st.caption("🔒 Create Video available only for VISUALLY_PRODUCIBLE topics")
 
     st.divider()
+
+
+# ===================================================================
+# MODULE-LEVEL ENTRY POINT
+# ===================================================================
+# This is the canonical Streamlit entry point. It must be called at
+# module level so Streamlit executes the full application on each run.
+_render_application()
