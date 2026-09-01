@@ -6525,7 +6525,12 @@ def _render_content_intelligence_view():
                 }
         st.rerun()
 
-    # Display results
+    # ------------------------------------------------------------------
+    # VISUAL OPPORTUNITY ENGINE (always rendered, independent of CI results)
+    # ------------------------------------------------------------------
+    _render_visual_opportunity_engine(category)
+
+    # Display CI results
     result = st.session_state.get("ci_result")
     if result is None:
         st.info("Click 'Fetch Live Trends' to get real-time data from external providers, or 'Analyze Custom Topics' to analyze your own topics.")
@@ -6753,11 +6758,6 @@ def _render_content_intelligence_view():
     # Empty state
     if not trends and not opportunities and not hypotheses and not patterns:
         st.info("No results. Try adjusting the controls or fetching live data.")
-
-    # ------------------------------------------------------------------
-    # VISUAL OPPORTUNITY ENGINE
-    # ------------------------------------------------------------------
-    _render_visual_opportunity_engine(category)
 
 
 def _render_visual_opportunity_engine(category: str = "general"):
