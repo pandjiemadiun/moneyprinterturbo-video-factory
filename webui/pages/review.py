@@ -1,9 +1,13 @@
 """
-Review page — Inspect an opportunity before creating.
+Review page — decision screen: "Is this actually worth producing?"
 
-Shows why a topic is worth making, the evidence, visual feasibility,
-provider availability, and proposed format. Then provides a clear
-primary action: Create Video.
+Compact, scannable sections answering:
+    Opportunity · Trend evidence · Visual evidence · Provider coverage ·
+    Production readiness · Suggested angle · Hook · Format · Keywords
+
+Then a clear primary action: Create Video (prefills Create).
+Back → Discover. Preserves the prefill contract:
+    prefill_video_subject / prefill_video_script_prompt / prefill_video_keywords
 """
 
 import streamlit as st
@@ -26,7 +30,7 @@ def render_review():
             "No opportunity selected.</p>",
             unsafe_allow_html=True,
         )
-        if st.button("Back to Discover", key="review_back_empty", type="primary", use_container_width=True):
+        if st.button(tr("Back to Discover"), key="review_back_empty", type="primary", use_container_width=True):
             from webui.nav_pages import discover_page
             st.switch_page(discover_page)
         return
@@ -43,75 +47,103 @@ def render_review():
     score_explanation = item.get("score_explanation", "")
     sources = item.get("sources", [])
     evidence = item.get("evidence", [])
+    providers = item.get("providers", [])
+    feasibility = item.get("visual_feasibility", "")
+    feasibility_note = item.get("feasibility_note", "")
 
-    # Header
+    # Production gate: producible iff footage providers are available and the
+    # feasibility check is not Low. This is the core product rule:
+    # TREND -> OPPORTUNITY -> VISUAL FEASIBILITY -> PRODUCTION
+    producible = bool(providers) and feasibility != "Low"
+
+    # ── Header ───────────────────────────────────────────────────────────────
     st.markdown(
         f"<h1 style='margin-bottom: 0.25rem;'>{topic}</h1>"
         f"<p style='color: #64748b; margin-top: 0; margin-bottom: 1.5rem;'>"
-        f"Why this topic is worth making.</p>",
+        f"Decision screen: is this worth producing?</p>",
         unsafe_allow_html=True,
     )
 
-    # Score summary
-    col1, col2, col3 = st.columns(3)
-    with col1:
+    # ── Score summary ───────────────────────────────────────────────────────
+    meta_cols = st.columns(4)
+    with meta_cols[0]:
         if confidence:
-            st.metric("Confidence", f"{confidence:.0%}")
+            st.metric(tr("Confidence"), f"{confidence:.0%}")
         elif score:
-            st.metric("Score", f"{score:.2f}")
-    with col2:
+            st.metric(tr("Score"), f"{score:.2f}")
+    with meta_cols[1]:
         if freshness:
-            st.metric("Freshness", f"{freshness:.0f} min" if freshness > 1 else "now")
-    with col3:
+            st.metric(tr("Freshness"), f"{freshness} min" if freshness > 1 else "now")
+    with meta_cols[2]:
         if format_type:
-            st.metric("Format", format_type)
+            st.metric(tr("Format"), format_type)
+    with meta_cols[3]:
+        st.metric(tr("Providers"), len(providers) if providers else len(sources) if sources else "-")
 
     st.divider()
 
-    # Why this topic
+    # ── Opportunity / Suggested angle ───────────────────────────────────────
     with st.container(border=True):
-        st.subheader("Why This Topic?")
-        if hook:
-            st.markdown(f"**Hook:** {hook}")
-        elif angle:
-            st.markdown(f"**Angle:** {angle}")
+        st.subheader(tr("Opportunity"))
         if content_promise:
-            st.markdown(f"**Promise:** {content_promise}")
+            st.markdown(f"**{tr('Content Promise')}:** {content_promise}")
+        if hook:
+            st.markdown(f"**{tr('Hook')}:** {hook}")
+        elif angle:
+            st.markdown(f"**{tr('Suggested Angle')}:** {angle}")
         if keywords:
-            st.markdown(f"**Keywords:** {', '.join(keywords)}")
+            st.markdown(f"**{tr('Keywords')}:** {', '.join(keywords)}")
+        if score_explanation:
+            st.markdown(f"**{tr('Why It Scores')}:** {score_explanation}")
 
-    # Evidence
-    if evidence or sources:
+    # ── Trend evidence ───────────────────────────────────────────────────────
+    if evidence:
         with st.container(border=True):
-            st.subheader("Evidence")
-            if sources:
-                st.markdown(f"**Sources:** {', '.join(sources)}")
-            if evidence:
-                st.markdown("**Trend Evidence:**")
-                for ev in evidence[:5]:
-                    st.caption(f"• {ev}")
+            st.subheader(tr("Trend Evidence"))
+            for ev in evidence[:5]:
+                if isinstance(ev, str) and ev.startswith("url="):
+                    st.markdown(f"• [source]({ev[4:]})")
+                elif isinstance(ev, str) and ev.startswith("source_url="):
+                    st.markdown(f"• [source]({ev[10:]})")
+                else:
+                    st.markdown(f"• {ev}")
 
-    # Score explanation
-    if score_explanation:
+    # ── Visual evidence + Provider coverage + Production readiness ──────────
+    with st.container(border=True):
+        st.subheader(tr("Production Readiness"))
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            if feasibility:
+                st.markdown(f"**{tr('Visual Feasibility')}:** {feasibility}")
+            gate = "✅ Producible" if producible else "⚠️ Not producible"
+            st.markdown(f"**{tr('Production Gate')}:** {gate}")
+        with col2:
+            if providers:
+                st.markdown(f"**{tr('Provider Coverage')}:** {', '.join(providers)}")
+            if feasibility_note:
+                st.caption(feasibility_note)
+            else:
+                st.caption(tr("Provider Coverage Help") or "Footage is verified available on the listed providers.")
+
+    if sources:
         with st.container(border=True):
-            st.subheader("Score Explanation")
-            st.caption(score_explanation)
+            st.subheader(tr("Source / Provenance"))
+            st.caption(", ".join(sources))
 
+    # ── Primary action ───────────────────────────────────────────────────────
     st.divider()
-
-    # Primary action
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Create Video", key="review_create", type="primary", use_container_width=True, icon=":material/movie:"):
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button(tr("Create Video"), key="review_create", type="primary", use_container_width=True, icon=":material/movie:"):
             _navigate_to_create(item)
-    with col2:
-        if st.button("Back to Discover", key="review_back", use_container_width=True):
+    with c2:
+        if st.button(tr("Back to Discover"), key="review_back", use_container_width=True):
             from webui.nav_pages import discover_page
             st.switch_page(discover_page)
 
 
 def _navigate_to_create(item):
-    """Transfer opportunity data to Create page and navigate."""
+    """Transfer opportunity data to Create page and navigate (prefill contract)."""
     from webui.nav_pages import create_page
 
     topic = item.get("topic", "")

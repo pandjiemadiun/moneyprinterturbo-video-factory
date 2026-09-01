@@ -257,3 +257,97 @@ def test_settings_imports_datetime():
         ):
             has_import = True
     assert has_import, "settings.py must import datetime (used by _render_cache_settings)"
+
+
+# ---------------------------------------------------------------------------
+# Phase 14.7 — Product Shell deterministic tests
+# ---------------------------------------------------------------------------
+
+def test_settings_has_six_category_tabs():
+    """Settings page exposes the 6 canonical category tabs (no 100-field form)."""
+    at = _load_main()
+    at._page_hash = calc_hash("render_settings")
+    at.run()
+    assert not at.exception, at.exception
+    assert len(at.tabs) == 6, f"expected 6 Settings tabs, got {len(at.tabs)}"
+    labels = [t.label for t in at.tabs]
+    assert labels == [
+        "🎬 Video", "🤖 AI & Script", "🎙 Voice & Audio",
+        "🎞 Footage Providers", "🧠 Discovery", "🛠 System",
+    ], labels
+
+
+def test_settings_has_diagnostics_subsection():
+    """🛠 System includes a Diagnostics subsection (Application version shown)."""
+    at = _load_main()
+    at._page_hash = calc_hash("render_settings")
+    at.run()
+    assert not at.exception, at.exception
+    captions = [c.value for c in at.caption if getattr(c, "value", None)]
+    assert any("Application version" in v for v in captions), \
+        "Settings System tab has no Diagnostics subsection (Application version)"
+
+
+def test_discover_shows_recommended_opportunities_without_network():
+    """First-load Discover shows curated recommended opportunities (no external API)."""
+    at = _load_main()
+    at._page_hash = calc_hash("render_discover")
+    at.run()
+    assert not at.exception, at.exception
+    md = [m.value for m in at.markdown if m.value]
+    assert any("Quantum Espresso Machines" in v for v in md), "Discover did not render a recommended opportunity"
+    labels = [getattr(b, "label", "") for b in at.button]
+    assert "Fetch Live Trends" in labels, "Discover must keep Fetch Live Trends as an explicit action"
+
+
+def test_review_renders_production_gate_and_create():
+    """Review decision screen shows the production gate + Create Video primary action."""
+    item = {
+        "topic": "Quantum Espresso",
+        "proposed_hook": "Hook here",
+        "content_promise": "Promise here",
+        "format": "Explainer",
+        "keywords": ["quantum", "espresso"],
+        "providers": ["Pexels"],
+        "visual_feasibility": "High",
+    }
+    at = _load_main()
+    at.session_state["review_item"] = item
+    at._page_hash = calc_hash("render_review")
+    at.run()
+    assert not at.exception, at.exception
+    md = [m.value for m in at.markdown if m.value]
+    assert any("Production Gate" in v for v in md), "Review missing Production Readiness gate"
+    assert any("Producible" in v for v in md), "Review missing producibility verdict"
+    labels = [getattr(b, "label", "") for b in at.button]
+    assert "Create Video" in labels and "Back to Discover" in labels
+
+
+def test_library_tab_completed_label(monkeypatch):
+    """Library status tab 'Completed' (not 'Complete'); rendering a task that
+    appears in BOTH the 'All' tab and its status tab must NOT raise
+    StreamlitDuplicateElementKey (regression guard for status-scoped keys)."""
+    from webui.pages import library as library_mod
+    import app.models.const as const
+    monkeypatch.setattr(library_mod, "collect_task_summaries", lambda limit=20: [{
+        "task_id": "t-1", "subject": "Demo Video", "state": const.TASK_STATE_COMPLETE,
+        "progress": 100, "video_file": "/no/such/final-1.mp4", "video_source": "pexels",
+        "mtime": 1700000000.0, "failed_stage": None,
+    }])
+    at = _load_main()
+    at._page_hash = calc_hash("render_library")
+    at.run()
+    assert not at.exception, at.exception  # duplicate-key crash would surface here
+    labels = [t.label for t in at.tabs]
+    assert "Completed" in labels, labels
+    assert "Complete" not in labels, f"'Complete' label still present: {labels}"
+
+
+def test_create_step_labels_are_content_visuals_voice_style():
+    """Create guided flow uses the spec step labels: Content/Visuals/Voice/Style."""
+    src = _read(MAIN.parent / "pages" / "create.py")
+    assert "1. Content" in src
+    assert "3. Visuals" in src
+    assert "4. Voice" in src
+    assert "5. Style" in src
+    assert "Generate Video" in src  # Produce primary action preserved

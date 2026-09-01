@@ -9,7 +9,9 @@ import streamlit as st
 import sys
 import os
 import json
+import webbrowser
 from datetime import datetime
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
@@ -52,19 +54,30 @@ def render_settings():
         unsafe_allow_html=True,
     )
 
-    # Tabs for different settings categories
-    tabs = st.tabs(["LLM Provider", "Material APIs", "Key Backup", "Cache", "Interface"])
+    # Canonical settings categories (docs/PRODUCTION_RUNTIME_CONTRACT.md §6).
+    # Each tab isolates ONE concern so the page is never a 100-field vertical
+    # form. Defaults defined here flow into Create/Review as starting values.
+    tabs = st.tabs([
+        "🎬 Video", "🤖 AI & Script", "🎙 Voice & Audio",
+        "🎞 Footage Providers", "🧠 Discovery", "🛠 System",
+    ])
 
     with tabs[0]:
-        _render_llm_settings()
+        _render_video_settings()
     with tabs[1]:
-        _render_material_api_settings()
+        _render_llm_settings()
+        _render_script_defaults()
     with tabs[2]:
-        _render_key_backup_settings()
+        _render_voice_audio_settings()
     with tabs[3]:
-        _render_cache_settings()
+        _render_material_api_settings()
     with tabs[4]:
+        _render_discovery_settings()
+    with tabs[5]:
+        _render_cache_settings()
+        _render_key_backup_settings()
         _render_interface_settings()
+        _render_diagnostics()
 
 
 def _render_llm_settings():
@@ -337,3 +350,194 @@ def tr_optional(key, fallback_language=""):
         fallback_loc = locales.get(fallback_language, {})
         value = fallback_loc.get("Translation", {}).get(key, "")
     return value if value else ""
+
+
+# ── Product-shell category renderers ────────────────────────────────────────
+# These surface defaults into Settings. Create/Review consume the same config
+# keys, so "defaults come from Settings" without rewriting the engine.
+
+def _render_video_settings():
+    """🎬 Video — visual-production defaults surfaced into Settings."""
+    st.subheader(tr("Video Defaults"))
+    video_sources = [
+        (tr("Pexels"), "pexels"), (tr("Pixabay"), "pixabay"), (tr("Coverr"), "coverr"),
+        (tr("YouTube"), "youtube"), (tr("WaveSpeed AI Video"), "wavespeed"),
+        (tr("Shengsuan Cloud AI Video"), "loomloom"), (tr("Local file"), "local"),
+    ]
+    saved_video_source = config.app.get("video_source", "pexels")
+    video_source = stable_selectbox(
+        tr("Default Video Source"), options=[v for _, v in video_sources],
+        default_value=saved_video_source, key="mpts_video_source_select",
+        format_func=lambda value: dict((v, label) for label, v in video_sources)[value],
+    )
+    _set_runtime_config("app", "video_source", video_source)
+
+    video_aspect_ratios = [(tr("Portrait"), VideoAspect.portrait.value), (tr("Landscape"), VideoAspect.landscape.value)]
+    aspect_values = [v for _, v in video_aspect_ratios]
+    saved_aspect = _saved_ui_choice(f"video_aspect_{video_source}", aspect_values, video_aspect_ratios[0][1])
+    selected_aspect = stable_selectbox(
+        tr("Default Video Ratio"), options=aspect_values, default_value=saved_aspect,
+        key="mpts_video_aspect_select",
+        format_func=lambda value: dict((v, label) for label, v in video_aspect_ratios)[value],
+    )
+    _set_runtime_config("ui", f"video_aspect_{video_source}", selected_aspect)
+
+    durations = [2, 3, 4, 5, 6, 7, 8, 9, 10]
+    clip_duration = stable_selectbox(
+        tr("Default Clip Duration (sec)"), options=durations,
+        default_value=_saved_ui_choice("video_clip_duration", durations, 3), key="mpts_clip_duration",
+    )
+    _set_runtime_config("ui", "video_clip_duration", clip_duration)
+
+    counts = [1, 2, 3, 4, 5]
+    video_count = stable_selectbox(
+        tr("Default Videos Per Batch"), options=counts,
+        default_value=_saved_ui_choice("video_count", counts, 1), key="mpts_video_count",
+    )
+    _set_runtime_config("ui", "video_count", video_count)
+
+    st.subheader(tr("Subtitle Defaults"))
+    subtitle_enabled = st.checkbox(
+        tr("Enable Subtitles"),
+        value=_saved_ui_bool("subtitle_enabled", DEFAULT_SUBTITLE_SETTINGS["subtitle_enabled"]),
+        key="mpts_subtitle_enabled",
+    )
+    _set_runtime_config("ui", "subtitle_enabled", subtitle_enabled)
+    font_names = get_all_fonts()
+    saved_font = config.ui.get("font_name", DEFAULT_SUBTITLE_SETTINGS["font_name"])
+    font_idx = font_names.index(saved_font) if saved_font in font_names else 0
+    font_name = stable_selectbox(
+        tr("Default Font"), options=font_names or [""],
+        default_value=(font_names[font_idx] if font_names else ""),
+        key="mpts_font_name", disabled=not subtitle_enabled,
+    )
+    _set_runtime_config("ui", "font_name", font_name)
+
+    subtitle_positions = [(tr("Top"), "top"), (tr("Center"), "center"), (tr("Bottom"), "bottom"), (tr("Custom"), "custom")]
+    pos_values = [v for _, v in subtitle_positions]
+    saved_pos = _saved_ui_choice("subtitle_position", pos_values, DEFAULT_SUBTITLE_SETTINGS["subtitle_position"])
+    position = stable_selectbox(
+        tr("Default Subtitle Position"), options=pos_values, default_value=saved_pos,
+        key="mpts_subtitle_position",
+        format_func=lambda value: dict((v, label) for label, v in subtitle_positions)[value],
+        disabled=not subtitle_enabled,
+    )
+    _set_runtime_config("ui", "subtitle_position", position)
+
+
+def _render_script_defaults():
+    """🤖 AI & Script — script-generation defaults surfaced into Settings."""
+    st.subheader(tr("Script Defaults"))
+    video_languages = [(tr("Auto Detect"), "")] + [(code, code) for code in support_locales]
+    language_values = [v for _, v in video_languages]
+    saved_language = _saved_ui_choice("video_language", language_values, "")
+    language = stable_selectbox(
+        tr("Default Script Language"), options=language_values, default_value=saved_language,
+        key="mpts_script_language",
+        format_func=lambda value: dict((v, label) for label, v in video_languages)[value],
+    )
+    _set_runtime_config("ui", "video_language", language)
+
+    script_prompt = st.text_area(
+        tr("Video Script Prompt"), value=_saved_ui_text("video_script_prompt", max_length=None),
+        height=120, key="mpts_script_prompt_input",
+    )
+    _set_runtime_config("ui", "video_script_prompt", script_prompt)
+
+    paragraph_number = st.number_input(
+        tr("Default Paragraph Number"), min_value=1, max_value=8,
+        value=int(_saved_ui_number("paragraph_number", 1, 1, 8, int)), key="mpts_paragraph_number",
+    )
+    _set_runtime_config("ui", "paragraph_number", int(paragraph_number))
+
+
+def _render_voice_audio_settings():
+    """🎙 Voice & Audio — voice defaults surfaced into Settings (full preview on Create)."""
+    st.subheader(tr("Voice Defaults Applied On Create"))
+    tts_server_options = ["azure-tts-v1", "azure-tts-v2", "siliconflow", "gemini-tts",
+                          "mimo-tts", "minimax-tts", "elevenlabs", "chatterbox", "fish_audio"]
+    tts_server_labels = {
+        "azure-tts-v1": "Azure TTS V1", "azure-tts-v2": "Azure TTS V2",
+        "siliconflow": "SiliconFlow TTS", "gemini-tts": "Google Gemini TTS",
+        "mimo-tts": "Xiaomi MiMo TTS", "minimax-tts": "MiniMax TTS",
+        "elevenlabs": "ElevenLabs TTS", "chatterbox": "Chatterbox TTS",
+        "fish_audio": "Fish Audio TTS",
+    }
+    saved_tts = config.ui.get("tts_server", "azure-tts-v1")
+    tts_server = stable_selectbox(
+        tr("Default Voiceover Service"), options=tts_server_options,
+        default_value=(saved_tts if saved_tts in tts_server_options else "azure-tts-v1"),
+        key="mpts_tts_server",
+        format_func=lambda value: tts_server_labels[value],
+    )
+    _set_runtime_config("ui", "tts_server", tts_server)
+
+    voice_name = st.text_input(tr("Default Voice Name (optional)"), value=config.ui.get("voice_name", ""), key="mpts_voice_name")
+    if voice_name:
+        _set_runtime_config("ui", "voice_name", voice_name)
+    st.caption("Select a voice and use the voice preview on the Create page to test it.")
+
+    voice_mode_labels = {"tts": tr("Automatic Voiceover"), "upload": tr("Upload Voiceover"), "none": tr("No Voiceover")}
+    saved_voice_mode = config.ui.get("voice_mode", "tts") if config.ui.get("voice_mode") in {"tts", "upload", "none"} else "tts"
+    voice_mode = stable_segmented_control(
+        tr("Default Voiceover Mode"), options=["tts", "upload", "none"],
+        default_value=saved_voice_mode, key="mpts_voice_mode",
+        format_func=lambda value: voice_mode_labels[value], width="stretch",
+    )
+    _set_runtime_config("ui", "voice_mode", voice_mode)
+
+    if voice_mode == "tts":
+        volumes = [0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 3.0, 4.0, 5.0]
+        voice_volume = stable_selectbox(tr("Default Voice Volume"), options=volumes,
+            default_value=_saved_ui_choice("voice_volume", volumes, 1.0), key="mpts_voice_volume",
+            format_func=lambda value: f"{int(value * 100)}%")
+        _set_runtime_config("ui", "voice_volume", voice_volume)
+        rates = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.8, 2.0]
+        voice_rate = stable_selectbox(tr("Default Voice Speed"), options=rates,
+            default_value=_saved_ui_choice("voice_rate", rates, 1.0), key="mpts_voice_rate",
+            format_func=lambda value: f"{value:.1f}x")
+        _set_runtime_config("ui", "voice_rate", voice_rate)
+
+    st.subheader(tr("Background Music"))
+    custom_bgm = st.text_input(tr("Custom BGM File Path"), value=_saved_ui_text("custom_bgm_file"), key="mpts_custom_bgm")
+    if custom_bgm:
+        _set_runtime_config("ui", "custom_bgm_file", custom_bgm)
+
+
+def _render_discovery_settings():
+    """🧠 Discovery — geography/language/category defaults + visual-producibility gate."""
+    st.subheader(tr("Discovery Defaults"))
+    geos = ["ID", "US", "GB", "AU", "MY", "SG"]
+    geo = stable_selectbox(tr("Geography"), options=geos,
+        default_value=_saved_ui_choice("discover_geo", geos, "ID"), key="mpts_discover_geo")
+    _set_runtime_config("ui", "discover_geo", geo)
+
+    langs = ["id", "en"]
+    language = stable_selectbox(tr("Language"), options=langs,
+        default_value=_saved_ui_choice("discover_language", langs, "id"), key="mpts_discover_language")
+    _set_runtime_config("ui", "discover_language", language)
+
+    categories = ["general", "technology", "business", "sports", "entertainment", "health", "science"]
+    category = stable_selectbox(tr("Category"), options=categories,
+        default_value=_saved_ui_choice("discover_category", categories, "general"), key="mpts_discover_category")
+    _set_runtime_config("ui", "discover_category", category)
+
+    strict = st.checkbox(tr("Strict Visual Feasibility"),
+        value=_saved_ui_bool("visual_producibility_strict", False), key="mpts_visual_strict")
+    _set_runtime_config("ui", "visual_producibility_strict", strict)
+    st.caption("When on, only topics with available Pexels/Pixabay/Coverr footage are recommended.")
+
+
+def _render_diagnostics():
+    """🛠 System — read-only runtime diagnostics."""
+    st.subheader(tr("Diagnostics"))
+    version = getattr(config, "project_version", None) or "unknown"
+    st.caption(f"Application version: {version}")
+    config_path = getattr(config, "config_file", None) or ""
+    if config_path:
+        st.caption(f"Config file: {config_path}")
+    try:
+        total = get_video_cache_stats()
+        st.caption(f"Cache: {total.file_count} files, {format_file_size(total.total_size)}")
+    except Exception as exc:
+        st.caption(f"Cache stats unavailable: {exc}")

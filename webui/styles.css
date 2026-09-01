@@ -174,6 +174,16 @@ label[data-testid="stCheckbox"] span {
     font-weight: 600 !important;
 }
 
+/* ── Library thumbnail placeholders (status-tinted) ──────────────────────── */
+.thumb-status-complete { background: #064e35 !important; }
+.thumb-status-processing { background: #78350f !important; }
+.thumb-status-failed { background: #7f1d1d !important; }
+.thumb-status-queued { background: #374151 !important; }
+.thumb-status-complete { color: #34d399 !important; }
+.thumb-status-processing { color: #fbbf24 !important; }
+.thumb-status-failed { color: #f87171 !important; }
+.thumb-status-queued { color: #94a3b8 !important; }
+
 /* ── Empty state ─────────────────────────────────────────────────────────── */
 .empty-state {
     text-align: center !important;

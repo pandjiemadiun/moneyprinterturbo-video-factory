@@ -57,7 +57,7 @@ def render_create():
 
     # ── Step 1: Topic ──────────────────────────────────────────────────────
     with st.container(border=True):
-        st.subheader("1. Topic")
+        st.subheader("1. Content")
         params.video_subject = st.text_area(
             tr("Video Subject"),
             placeholder=tr("Video Subject Placeholder"),
@@ -122,7 +122,7 @@ def render_create():
 
     # ── Step 3: Video Settings ─────────────────────────────────────────────
     with st.container(border=True):
-        st.subheader("3. Visual Settings")
+        st.subheader("3. Visuals")
 
         video_sources = [
             (tr("Pexels"), "pexels"), (tr("Pixabay"), "pixabay"), (tr("Coverr"), "coverr"),
@@ -183,7 +183,7 @@ def render_create():
 
     # ── Step 4: Audio Settings ─────────────────────────────────────────────
     with st.container(border=True):
-        st.subheader("4. Audio Settings")
+        st.subheader("4. Voice")
 
         voice_mode_options = [VOICE_MODE_TTS, VOICE_MODE_UPLOAD, VOICE_MODE_NONE]
         voice_mode_labels = {
@@ -331,7 +331,7 @@ def render_create():
 
     # ── Step 5: Subtitle Settings ───────────────────────────────────────────
     with st.container(border=True):
-        st.subheader("5. Subtitle Settings")
+        st.subheader("5. Style")
         st.session_state.setdefault("subtitle_enabled_checkbox", _saved_ui_bool("subtitle_enabled", DEFAULT_SUBTITLE_SETTINGS["subtitle_enabled"]))
         params.subtitle_enabled = st.checkbox(tr("Enable Subtitles"), key="subtitle_enabled_checkbox")
         _set_runtime_config("ui", "subtitle_enabled", params.subtitle_enabled)

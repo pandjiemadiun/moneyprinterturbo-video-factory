@@ -71,7 +71,7 @@ def render_library():
     status_tabs = [
         ("all", "All"),
         ("processing", "Processing"),
-        ("complete", "Complete"),
+        ("complete", "Completed"),
         ("failed", "Failed"),
     ]
     tabs = st.tabs([label for _, label in status_tabs])
@@ -85,7 +85,7 @@ def render_library():
                 st.info(f"No {status_key} tasks.")
                 continue
             for task in filtered_tasks:
-                _render_task_card(task)
+                _render_task_card(task, status_key)
 
     # Cleanup operations
     with st.expander("Cleanup", expanded=False):
@@ -118,8 +118,12 @@ def render_library():
                 st.rerun()
 
 
-def _render_task_card(task):
-    """Render a single task card with status, progress, and actions."""
+def _render_task_card(task, status_key):
+    """Render a single task card with status, progress, and actions.
+
+    ``status_key`` scopes widget keys so the same task (rendered in the "All"
+    tab and its status tab) never collides on its Streamlit element keys.
+    """
     task_id = task.get("task_id", "")
     state = task.get("state")
     progress = task.get("progress", 0)
@@ -127,7 +131,7 @@ def _render_task_card(task):
     # Status styling
     if state == const.TASK_STATE_COMPLETE:
         status_class = "status-complete"
-        status_label = "Complete"
+        status_label = "Completed"
     elif state == const.TASK_STATE_PROCESSING:
         status_class = "status-processing"
         status_label = "Processing"
@@ -141,9 +145,19 @@ def _render_task_card(task):
         status_class = "status-queued"
         status_label = "Queued"
 
-    with st.container(key=f"task_card_{task_id}", border=True):
+    with st.container(key=f"task_card_{status_key}_{task_id}", border=True):
         col1, col2, col3 = st.columns([3, 1, 1.5])
         with col1:
+            # Thumbnail (real if the task summary exposes one, else a status tinted placeholder)
+            thumbnail = task.get("thumbnail") or ""
+            if thumbnail and os.path.isfile(thumbnail):
+                st.image(thumbnail, width=60)
+            else:
+                st.markdown(
+                    f"<div class='thumb-{status_class}' style='width:60px;height:36px;display:flex;"
+                    f"align-items:center;justify-content:center;font-size:1.4rem;border-radius:6px;'>🎬</div>",
+                    unsafe_allow_html=True,
+                )
             st.write(f"**{task.get('subject', task_id)}**")
             if task.get("video_source"):
                 st.caption(f"Source: {task['video_source']}")
@@ -165,41 +179,44 @@ def _render_task_card(task):
             is_busy = is_processing or tm.is_task_busy(task)
 
             if state == const.TASK_STATE_QUEUED:
-                if st.button("✕", key=f"task_cancel_{task_id}", help="Cancel", type="primary"):
+                if st.button("✕", key=f"task_cancel_{status_key}_{task_id}", help="Cancel", type="primary"):
                     _do_job_action(task_id, "cancel")
                     st.rerun()
             elif state == const.TASK_STATE_PROCESSING:
                 st.caption("Processing...")
             elif state == const.TASK_STATE_FAILED:
-                if st.button("↻", key=f"task_retry_{task_id}", help="Retry"):
+                if st.button("↻", key=f"task_retry_{status_key}_{task_id}", help="Retry"):
                     _do_job_action(task_id, "retry")
                     st.rerun()
-                if st.button("✕", key=f"task_delete_{task_id}", help="Delete", type="primary"):
+                if st.button("✕", key=f"task_delete_{status_key}_{task_id}", help="Delete", type="primary"):
                     _do_job_action(task_id, "delete")
                     st.rerun()
             elif state == const.TASK_STATE_CANCELLED:
-                if st.button("↻", key=f"task_retry_{task_id}", help="Retry"):
+                if st.button("↻", key=f"task_retry_{status_key}_{task_id}", help="Retry"):
                     _do_job_action(task_id, "retry")
                     st.rerun()
-                if st.button("✕", key=f"task_delete_{task_id}", help="Delete", type="primary"):
+                if st.button("✕", key=f"task_delete_{status_key}_{task_id}", help="Delete", type="primary"):
                     _do_job_action(task_id, "delete")
                     st.rerun()
             elif state == const.TASK_STATE_COMPLETE:
-                acols = st.columns(3)
+                acols = st.columns(4)
                 with acols[0]:
                     if has_video:
-                        with st.popover("▶", key=f"task_play_{task_id}", help="Play"):
+                        with st.popover("▶", key=f"task_play_{status_key}_{task_id}", help="Play"):
                             st.video(video_file)
                     else:
                         st.empty()
                 with acols[1]:
+                    if st.button("📂", key=f"task_open_{status_key}_{task_id}", help="Open folder"):
+                        open_task_path(task_id)
+                with acols[2]:
                     if has_video:
                         filename = os.path.basename(video_file)
-                        st.link_button("↓", url=f"/api/v1/download/{task_id}/{filename}", key=f"task_download_{task_id}", help="Download")
+                        st.link_button("↓", url=f"/api/v1/download/{task_id}/{filename}", key=f"task_download_{status_key}_{task_id}", help="Download")
                     else:
                         st.empty()
-                with acols[2]:
-                    if st.button("✕", key=f"task_delete_{task_id}", help="Delete", type="primary"):
+                with acols[3]:
+                    if st.button("✕", key=f"task_delete_{status_key}_{task_id}", help="Delete", type="primary"):
                         _do_job_action(task_id, "delete")
                         st.rerun()
 
