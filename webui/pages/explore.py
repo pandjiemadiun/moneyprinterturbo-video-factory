@@ -203,13 +203,13 @@ def render_explore():
                         keywords = hyp.get("keywords", [])
                         st.caption(f"Keywords: {', '.join(keywords[:3])}")
                     if st.button("Create Video", key=f"explore_create_{i}", type="primary"):
+                        from webui.nav_pages import create_page
                         st.session_state["prefill_video_subject"] = hyp.get("topic", "")
-                        st.session_state["prefill_script_prompt"] = (
+                        st.session_state["prefill_video_script_prompt"] = (
                             f"Topic: {hyp.get('topic', '')}. Hook: {hyp.get('proposed_hook', '')}. "
                             f"Promise: {hyp.get('content_promise', '')}. Format: {hyp.get('format', '')}."
                         )
                         st.session_state["prefill_video_keywords"] = ", ".join(hyp.get("keywords", []))
-                        st.session_state["nav_view"] = "create"
-                        st.rerun()
+                        st.switch_page(create_page)
         else:
             st.info("No hypotheses found.")

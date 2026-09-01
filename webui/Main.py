@@ -63,20 +63,15 @@ if selected_language != st.session_state.get("ui_language", ""):
     st.rerun()
 
 # ── Navigation ──────────────────────────────────────────────────────────────
-from webui.pages.discover import render_discover
-from webui.pages.explore import render_explore
-from webui.pages.create import render_create
-from webui.pages.library import render_library
-from webui.pages.settings import render_settings
+# Page objects are defined exactly once in the canonical registry
+# (webui/nav_pages.py) and reused both here and inside each page module for
+# programmatic navigation via st.switch_page(<StreamlitPage object>).
+# DO NOT pass bare strings to st.switch_page() for callable-registered pages:
+# Streamlit resolves a string as a file path and raises StreamlitAPIException.
+from webui.nav_pages import NAV_PAGES
 
 pg = st.navigation(
-    [
-        st.Page(render_discover, title="Discover", icon="🏠", default=True),
-        st.Page(render_explore, title="Explore", icon="🔎"),
-        st.Page(render_create, title="Create", icon="🎬"),
-        st.Page(render_library, title="Library", icon="🎞️"),
-        st.Page(render_settings, title="Settings", icon="⚙️"),
-    ],
+    NAV_PAGES,
     position="sidebar",
 )
 

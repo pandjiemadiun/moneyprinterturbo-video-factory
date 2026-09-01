@@ -19,7 +19,7 @@ from webui.shared import (
     _saved_ui_choice, _saved_ui_number, _saved_ui_bool, _saved_ui_color, _saved_ui_text,
     _run_llm_read_operation, _build_uploaded_file_path, _detect_audio_mime,
     _parse_chatterbox_voices, _sync_chatterbox_config_from_session_state,
-    get_material_api_keys, save_material_api_keys,
+    get_material_api_keys, save_material_api_keys, support_locales,
     _effective_loomloom_api_token, _create_loomloom_script_backend, _create_loomloom_video_backend,
     _current_loomloom_video_quote_context, _loomloom_video_scene_prompts,
     _loomloom_script_signature, _loomloom_video_signature,
@@ -345,7 +345,7 @@ def render_create():
         params.font_name = stable_selectbox(
             tr("Font"), options=font_names,
             default_value=font_names[saved_font_name_index] if font_names else "",
-            key="font_name_select", disabled=subtitle_settings_disabled,
+            key="font_name_select_step5", disabled=subtitle_settings_disabled,
         )
         _set_runtime_config("ui", "font_name", params.font_name)
 
@@ -359,7 +359,7 @@ def render_create():
         selected_subtitle_position = stable_selectbox(
             tr("Position"), options=[value for _, value in subtitle_positions],
             default_value=subtitle_positions[saved_position_index][1],
-            key="subtitle_position_select",
+            key="subtitle_position_select_step5",
             format_func=lambda value: dict((v, label) for label, v in subtitle_positions)[value],
             disabled=subtitle_settings_disabled,
         )
@@ -390,7 +390,7 @@ def _consume_prefill_values():
     """Transfer prefill values from Discover/Explore into widget state keys."""
     prefill_map = {
         "prefill_video_subject": "video_subject",
-        "prefill_script_prompt": "video_script_prompt",
+        "prefill_video_script_prompt": "video_script_prompt",
         "prefill_video_keywords": "video_terms",
     }
     for prefill_key, widget_key in prefill_map.items():

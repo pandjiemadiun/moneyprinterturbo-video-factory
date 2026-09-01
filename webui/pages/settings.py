@@ -8,6 +8,8 @@ default video settings, advanced generation settings.
 import streamlit as st
 import sys
 import os
+import json
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
@@ -37,6 +39,7 @@ from webui.shared import (
     KEY_BACKUP_EXCLUDED_SECTIONS, CREDENTIAL_KEY_SUFFIXES,
     CREDENTIAL_COMPANION_KEYS, CREDENTIAL_WIDGET_STATE_ALIASES,
     support_locales,
+    locales, _get_material_api_keys, _save_material_api_keys,
 )
 
 

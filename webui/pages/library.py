@@ -37,13 +37,12 @@ def render_library():
             '<div class="empty-state">'
             '<div class="empty-state-icon">🎬</div>'
             '<h3>No videos yet</h3>'
-            '<p>Create your first video to see it here.</p>'
             '</div>',
             unsafe_allow_html=True,
         )
-        if st.button("Create Video", key="library_empty_create", type="primary"):
-            st.session_state["nav_view"] = "create"
-            st.rerun()
+        if st.button("Discover Ideas", key="library_empty_discover", type="primary", use_container_width=True, icon=":material/explore:"):
+            from webui.nav_pages import discover_page
+            st.switch_page(discover_page)
         return
 
     # Status statistics

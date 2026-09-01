@@ -4,6 +4,7 @@ Discover page — "What should I make?"
 Opportunity-first design: real opportunity cards are the primary content.
 Filters and configuration are secondary (behind a collapsible expander).
 Custom-topic analysis is secondary.
+Uses st.switch_page for proper multipage navigation.
 """
 
 import streamlit as st
@@ -179,39 +180,36 @@ def _render_opportunity_card(item, index, item_type):
                 type="primary",
                 use_container_width=True,
             ):
-                st.session_state["prefill_video_subject"] = topic
-                st.session_state["prefill_script_prompt"] = (
-                    f"Topic: {topic}. Hook: {hook or angle}. "
-                    f"Promise: {content_promise}. Format: {format_type}."
-                )
-                st.session_state["prefill_video_keywords"] = ", ".join(keywords)
-                st.session_state["nav_view"] = "create"
-                st.rerun()
+                _navigate_to_create(item)
         with acol2:
             if st.button(
                 "Review",
                 key=f"discover_review_{item_type}_{index}",
                 use_container_width=True,
             ):
-                st.session_state["discover_review_item"] = item
-                st.session_state["discover_show_review"] = True
-                st.rerun()
+                st.session_state["review_item"] = item
+                from webui.nav_pages import review_page
+                st.switch_page(review_page)
 
-    # Review dialog
-    if st.session_state.get("discover_show_review") and st.session_state.get("discover_review_item") == item:
-        with st.expander("Details", expanded=True):
-            if item.get("score_explanation"):
-                st.caption(f"Score: {item['score_explanation']}")
-            if content_promise:
-                st.caption(f"Promise: {content_promise}")
-            if keywords:
-                st.caption(f"Keywords: {', '.join(keywords)}")
-            sources = item.get("sources", [])
-            if sources:
-                st.caption(f"Sources: {', '.join(sources)}")
-            evidence = item.get("evidence", [])
-            if evidence:
-                st.caption(f"Evidence: {', '.join(evidence[:3])}")
+
+def _navigate_to_create(item):
+    """Transfer opportunity data to Create page and navigate."""
+    from webui.nav_pages import create_page
+
+    topic = item.get("topic", "")
+    hook = item.get("proposed_hook", "")
+    angle = item.get("angle", "")
+    keywords = item.get("keywords", [])
+    content_promise = item.get("content_promise", "")
+    format_type = item.get("format", "")
+
+    st.session_state["prefill_video_subject"] = topic
+    st.session_state["prefill_video_script_prompt"] = (
+        f"Topic: {topic}. Hook: {hook or angle}. "
+        f"Promise: {content_promise}. Format: {format_type}."
+    )
+    st.session_state["prefill_video_keywords"] = ", ".join(keywords)
+    st.switch_page(create_page)
 
 
 def _fetch_opportunities(geo, language, category):
