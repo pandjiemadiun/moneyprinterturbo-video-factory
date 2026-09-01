@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from app.controllers import ping
 from app.controllers.v1 import (
+    content_factory,
     content_intelligence,
     llm,
     video,
@@ -25,3 +26,4 @@ root_api_router.include_router(video.router)
 root_api_router.include_router(llm.router)
 root_api_router.include_router(content_intelligence.router)
 root_api_router.include_router(visual_opportunity.router)
+root_api_router.include_router(content_factory.router)

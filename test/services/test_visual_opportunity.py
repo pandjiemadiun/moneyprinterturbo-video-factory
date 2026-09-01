@@ -348,35 +348,53 @@ class TestProductionGate(unittest.TestCase):
         """Strong evidence should pass as PRODUCIBLE."""
         score = self._make_score(0.8)
         pa = self._make_pa("pexels", "x", usable=15, portrait=5, reframe=8, raw=20)
-        status = apply_production_gate(score, 15, 5, 8, [pa])
+        pa.relevance_counts = {"STRONG_RELEVANCE": 10, "PARTIAL_RELEVANCE": 5}
+        status = apply_production_gate(
+            score, 15, 5, 8, [pa],
+            relevance_confidence=0.8, total_relevant=15,
+        )
         self.assertEqual(status, VisualFeasibilityStatus.VISUALLY_PRODUCIBLE)
 
     def test_not_producible_low_evidence(self):
         """Low evidence should be NOT_PRODUCIBLE."""
         score = self._make_score(0.1)
         pa = self._make_pa("pexels", "x", usable=1, portrait=0, reframe=0, raw=5)
-        status = apply_production_gate(score, 1, 0, 0, [pa])
+        status = apply_production_gate(
+            score, 1, 0, 0, [pa],
+            relevance_confidence=0.1, total_relevant=0,
+        )
         self.assertEqual(status, VisualFeasibilityStatus.NOT_VISUALLY_PRODUCIBLE)
 
     def test_check_failed_all_providers_error(self):
         """All providers failing should be CHECK_FAILED."""
         score = self._make_score(0.0)
         pa = ProviderAvailability(provider="pexels", query="x", status="ERROR", error_message="timeout")
-        status = apply_production_gate(score, 0, 0, 0, [pa])
+        status = apply_production_gate(
+            score, 0, 0, 0, [pa],
+            relevance_confidence=0.0, total_relevant=0,
+        )
         self.assertEqual(status, VisualFeasibilityStatus.CHECK_FAILED)
 
     def test_visually_limited(self):
         """Medium evidence should be LIMITED."""
         score = self._make_score(0.4)
         pa = self._make_pa("pexels", "x", usable=5, portrait=1, reframe=2, raw=10)
-        status = apply_production_gate(score, 5, 1, 2, [pa])
+        pa.relevance_counts = {"STRONG_RELEVANCE": 2, "PARTIAL_RELEVANCE": 3}
+        status = apply_production_gate(
+            score, 5, 1, 2, [pa],
+            relevance_confidence=0.5, total_relevant=5,
+        )
         self.assertEqual(status, VisualFeasibilityStatus.VISUALLY_LIMITED)
 
     def test_reframable_landscape_can_produce(self):
         """Enough reframable landscape can make topic producible even with few portrait."""
         score = self._make_score(0.7)
         pa = self._make_pa("pexels", "x", usable=12, portrait=0, reframe=10, raw=20)
-        status = apply_production_gate(score, 12, 0, 10, [pa])
+        pa.relevance_counts = {"STRONG_RELEVANCE": 8, "PARTIAL_RELEVANCE": 4}
+        status = apply_production_gate(
+            score, 12, 0, 10, [pa],
+            relevance_confidence=0.75, total_relevant=12,
+        )
         self.assertEqual(status, VisualFeasibilityStatus.VISUALLY_PRODUCIBLE)
 
     def test_no_providers_not_check_failed(self):
@@ -549,6 +567,288 @@ class TestVisualOpportunityEngine(unittest.TestCase):
 
         # Should have probed twice
         self.assertEqual(call_count[0], 2)
+
+
+# ===========================================================================
+# I. RELEVANCE CHECKING TESTS
+# ===========================================================================
+
+class TestRelevanceQueryTopic(unittest.TestCase):
+    """Test deterministic query-topic relevance."""
+
+    def test_exact_match(self):
+        from app.services.visual_opportunity.relevance import compute_query_topic_relevance
+        self.assertAlmostEqual(compute_query_topic_relevance("mountain", "mountain"), 1.0)
+
+    def test_substring_match(self):
+        from app.services.visual_opportunity.relevance import compute_query_topic_relevance
+        self.assertAlmostEqual(compute_query_topic_relevance("mountain", "mountain landscape"), 0.9)
+
+    def test_stemming_match(self):
+        from app.services.visual_opportunity.relevance import compute_query_topic_relevance
+        # "mountain" should match "mountains" via stemming
+        score = compute_query_topic_relevance("mountain", "top 5 mountains")
+        self.assertGreaterEqual(score, 0.9)
+
+    def test_generic_query_penalized(self):
+        from app.services.visual_opportunity.relevance import compute_query_topic_relevance
+        # "people" is generic and unrelated to "mountain"
+        score = compute_query_topic_relevance("people", "top 5 mountains")
+        self.assertLessEqual(score, 0.3)
+
+    def test_unrelated_topic(self):
+        from app.services.visual_opportunity.relevance import compute_query_topic_relevance
+        score = compute_query_topic_relevance("pocong", "mountain landscape")
+        self.assertLess(score, 0.5)
+
+    def test_empty_inputs(self):
+        from app.services.visual_opportunity.relevance import compute_query_topic_relevance
+        self.assertEqual(compute_query_topic_relevance("", "mountain"), 0.0)
+        self.assertEqual(compute_query_topic_relevance("mountain", ""), 0.0)
+
+
+class TestRelevanceClassification(unittest.TestCase):
+    """Test relevance level classification."""
+
+    def test_levels(self):
+        from app.services.visual_opportunity.relevance import classify_relevance, RelevanceLevel
+        self.assertEqual(classify_relevance(0.8), RelevanceLevel.STRONG_RELEVANCE)
+        self.assertEqual(classify_relevance(0.5), RelevanceLevel.PARTIAL_RELEVANCE)
+        self.assertEqual(classify_relevance(0.3), RelevanceLevel.WEAK_RELEVANCE)
+        self.assertEqual(classify_relevance(0.1), RelevanceLevel.IRRELEVANT)
+        self.assertEqual(classify_relevance(0.0), RelevanceLevel.UNKNOWN)
+
+
+class TestGenericTermDetection(unittest.TestCase):
+    """Test generic term detection."""
+
+    def test_generic_terms(self):
+        from app.services.visual_opportunity.relevance import is_generic_term
+        self.assertTrue(is_generic_term("people"))
+        self.assertTrue(is_generic_term("landscape"))
+        self.assertTrue(is_generic_term("city"))
+
+    def test_specific_terms(self):
+        from app.services.visual_opportunity.relevance import is_generic_term
+        self.assertFalse(is_generic_term("mountain"))
+        self.assertFalse(is_generic_term("pocong"))
+        self.assertFalse(is_generic_term("ocean"))
+
+
+class TestMetadataRelevance(unittest.TestCase):
+    """Test provider metadata relevance checking."""
+
+    def test_matching_metadata(self):
+        from app.services.visual_opportunity.relevance import compute_metadata_relevance
+        from app.services.visual_opportunity.models import VisualCandidate
+        candidate = VisualCandidate(
+            provider="pexels", asset_id="1", source_url="http://x/1",
+            width=1920, height=1080, duration=10,
+        )
+        metadata = {"title": "mountain landscape", "tags": ["mountain", "nature"]}
+        score = compute_metadata_relevance(candidate, "mountain", metadata)
+        self.assertGreater(score, 0.5)
+
+    def test_non_matching_metadata(self):
+        from app.services.visual_opportunity.relevance import compute_metadata_relevance
+        from app.services.visual_opportunity.models import VisualCandidate
+        candidate = VisualCandidate(
+            provider="pexels", asset_id="1", source_url="http://x/1",
+            width=1920, height=1080, duration=10,
+        )
+        metadata = {"title": "people walking", "tags": ["people", "city"]}
+        score = compute_metadata_relevance(candidate, "mountain", metadata)
+        self.assertEqual(score, 0.0)
+
+    def test_no_metadata(self):
+        from app.services.visual_opportunity.relevance import compute_metadata_relevance
+        from app.services.visual_opportunity.models import VisualCandidate
+        candidate = VisualCandidate(
+            provider="pexels", asset_id="1", source_url="http://x/1",
+            width=1920, height=1080, duration=10,
+        )
+        score = compute_metadata_relevance(candidate, "mountain", {})
+        self.assertEqual(score, 0.0)
+
+
+class TestCandidateRelevance(unittest.TestCase):
+    """Test full candidate relevance computation."""
+
+    def test_strong_relevance(self):
+        from app.services.visual_opportunity.relevance import compute_candidate_relevance
+        from app.services.visual_opportunity.models import VisualCandidate, VisualConcept
+        candidate = VisualCandidate(
+            provider="pexels", asset_id="1", source_url="http://x/1",
+            width=1920, height=1080, duration=10,
+        )
+        concept = VisualConcept(term="mountain", source="topic", parent_topic="mountain landscape")
+        metadata = {"title": "mountain peak", "tags": ["mountain", "nature"]}
+        score, level, _ = compute_candidate_relevance(
+            candidate, concept, "mountain landscape", metadata
+        )
+        self.assertGreaterEqual(score, 0.75)
+        self.assertEqual(level.value, "STRONG_RELEVANCE")
+
+    def test_generic_footage_rejected(self):
+        from app.services.visual_opportunity.relevance import compute_candidate_relevance
+        from app.services.visual_opportunity.models import VisualCandidate, VisualConcept
+        candidate = VisualCandidate(
+            provider="pexels", asset_id="1", source_url="http://x/1",
+            width=1920, height=1080, duration=10,
+        )
+        # Generic query "people" for topic "pocong sightings"
+        concept = VisualConcept(term="people", source="category", parent_topic="pocong sightings")
+        metadata = {"title": "people walking", "tags": ["people", "city"]}
+        score, level, _ = compute_candidate_relevance(
+            candidate, concept, "pocong sightings", metadata
+        )
+        # Should be rejected: generic query + non-matching metadata
+        self.assertLess(score, 0.3)
+
+    def test_no_metadata_fallback(self):
+        from app.services.visual_opportunity.relevance import compute_candidate_relevance
+        from app.services.visual_opportunity.models import VisualCandidate, VisualConcept
+        candidate = VisualCandidate(
+            provider="pexels", asset_id="1", source_url="http://x/1",
+            width=1920, height=1080, duration=10,
+        )
+        concept = VisualConcept(term="mountain", source="topic", parent_topic="mountain landscape")
+        # No metadata available
+        score, level, _ = compute_candidate_relevance(
+            candidate, concept, "mountain landscape", {}
+        )
+        # Should be discounted but not zero (query is relevant)
+        self.assertGreater(score, 0.0)
+        self.assertLess(score, 0.5)
+
+
+class TestGenericFootageRejection(unittest.TestCase):
+    """Test that generic footage cannot inflate topic relevance."""
+
+    def _make_info(self, provider, query, title=None, tags=None):
+        from app.models.schema import MaterialInfo
+        return MaterialInfo(
+            provider=provider,
+            url=f"https://{provider}.com/vid/123.mp4",
+            duration=10,
+            source_info={
+                "provider": provider,
+                "search_term": query,
+                "asset_id": "123",
+                "source_page": f"https://{provider}.com/video/test",
+                "rendition": {"id": "r1", "width": 1920, "height": 1080},
+                "title": title,
+                "tags": tags or [],
+            },
+        )
+
+    def test_pocong_rejected_with_generic_footage(self):
+        """'pocong sightings' with only generic people footage should NOT be producible."""
+        from app.services.visual_opportunity.engine import create_visual_opportunity_engine
+        from unittest.mock import patch
+
+        def mock_search(provider, query, minimum_duration=3, video_aspect=None):
+            # All queries return generic people footage
+            return [self._make_info(provider, query, title="people walking", tags=["people", "city"])]
+
+        engine = create_visual_opportunity_engine(providers=["pexels"], max_opportunities=1)
+        engine.max_queries_per_topic = 3
+
+        with patch("app.services.visual_opportunity.provider_probe._call_provider_search") as m, \
+             patch("app.services.visual_opportunity.engine.get_configured_providers", return_value=["pexels"]):
+            m.side_effect = lambda prov, q, md: mock_search(prov, q)
+            result = engine.assess_topic("pocong sightings", category="general")
+
+        # Should NOT be producible — generic footage doesn't support the topic
+        self.assertNotEqual(result.status, VisualFeasibilityStatus.VISUALLY_PRODUCIBLE)
+        self.assertLess(result.relevance_confidence, 0.35)
+
+    def test_mountain_accepted_with_relevant_footage(self):
+        """'mountain landscape' with mountain footage should have high relevance."""
+        from app.services.visual_opportunity.engine import create_visual_opportunity_engine
+        from unittest.mock import patch
+
+        def mock_search(provider, query, minimum_duration=3, video_aspect=None):
+            q = query.lower()
+            if "mountain" in q:
+                return [self._make_info(provider, query, title="mountain peak", tags=["mountain", "nature"])]
+            return [self._make_info(provider, query, title="generic landscape", tags=["landscape"])]
+
+        engine = create_visual_opportunity_engine(providers=["pexels"], max_opportunities=1)
+        engine.max_queries_per_topic = 3
+
+        with patch("app.services.visual_opportunity.provider_probe._call_provider_search") as m, \
+             patch("app.services.visual_opportunity.engine.get_configured_providers", return_value=["pexels"]):
+            m.side_effect = lambda prov, q, md: mock_search(prov, q)
+            result = engine.assess_topic("mountain landscape", category="general")
+
+        # Should have high relevance confidence
+        self.assertGreater(result.relevance_confidence, 0.5)
+        self.assertGreater(result.total_strong_relevance, 0)
+
+
+class TestProductionGateWithRelevance(unittest.TestCase):
+    """Test that the production gate enforces relevance thresholds."""
+
+    def test_high_count_low_relevance_rejected(self):
+        """100 generic clips should not override poor relevance."""
+        from app.services.visual_opportunity.scorer import apply_production_gate, VisualFeasibilityScore
+        from app.services.visual_opportunity.models import ProviderAvailability
+
+        # Simulate high count but low relevance
+        score = VisualFeasibilityScore(total=0.7)  # High score
+        pa = ProviderAvailability(
+            provider="pexels", query="people", status="OK",
+            raw_count=100, usable_count=100,
+            relevance_counts={"WEAK_RELEVANCE": 50, "IRRELEVANT": 50},
+        )
+        status = apply_production_gate(
+            score=score, total_usable=100, total_native_portrait=0,
+            total_reframable_landscape=100, provider_availability=[pa],
+            relevance_confidence=0.1, total_relevant=0,
+        )
+        # Should NOT be producible due to low relevance confidence
+        self.assertNotEqual(status, VisualFeasibilityStatus.VISUALLY_PRODUCIBLE)
+
+    def test_sufficient_relevance_passes(self):
+        """Sufficient relevant assets should pass."""
+        from app.services.visual_opportunity.scorer import apply_production_gate, VisualFeasibilityScore
+        from app.services.visual_opportunity.models import ProviderAvailability
+
+        score = VisualFeasibilityScore(total=0.75)
+        pa = ProviderAvailability(
+            provider="pexels", query="mountain", status="OK",
+            raw_count=20, usable_count=15,
+            relevance_counts={"STRONG_RELEVANCE": 10, "PARTIAL_RELEVANCE": 5},
+            native_portrait_count=3, reframable_landscape_count=10,
+        )
+        status = apply_production_gate(
+            score=score, total_usable=15, total_native_portrait=3,
+            total_reframable_landscape=10, provider_availability=[pa],
+            relevance_confidence=0.8, total_relevant=15,
+        )
+        self.assertEqual(status, VisualFeasibilityStatus.VISUALLY_PRODUCIBLE)
+
+
+class TestNoFabricatedData(unittest.TestCase):
+    """Ensure no fake data exists in production code."""
+
+    def test_no_hardcoded_topics_in_relevance(self):
+        """Relevance module should not hardcode specific topics."""
+        import inspect
+        from app.services.visual_opportunity import relevance
+        source = inspect.getsource(relevance)
+        # Should not contain specific topic names like "pocong", "mountain" as special cases
+        self.assertNotIn('"pocong"', source)
+        self.assertNotIn("'pocong'", source)
+
+    def test_no_fake_provider_results(self):
+        """Provider probe should not contain fabricated results."""
+        import inspect
+        from app.services.visual_opportunity import provider_probe
+        source = inspect.getsource(provider_probe)
+        # Should not contain hardcoded MaterialInfo with fake data
+        self.assertNotIn("fake", source.lower())
 
 
 if __name__ == "__main__":

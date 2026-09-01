@@ -7093,13 +7093,32 @@ def _render_single_visual_assessment(assessment: dict, index: int):
                 "🎬 Create Video",
                 key=f"vo_create_video_{index}",
                 type="primary",
-                help="Create a video for this topic",
+                help="Create a video for this topic via Content Factory",
             ):
-                st.session_state["prefill_video_subject"] = topic
-                st.session_state["prefill_script_prompt"] = f"Topic: {topic}. Create an engaging short-form video."
-                st.session_state["prefill_video_keywords"] = ", ".join(concepts[:5]) if concepts else topic
-                st.session_state["nav_view"] = "create"
-                st.success(f"Switching to Create Video with topic: {topic}")
+                # Use Content Factory to produce the video.
+                visual_concepts = [
+                    {"concept": c, "source": "topic"}
+                    for c in concepts[:5]
+                ]
+                with st.spinner(f"Creating production task for: {topic}..."):
+                    result = webui_api_client.api_content_factory_produce(
+                        topic=topic,
+                        visual_concepts=visual_concepts,
+                        visual_feasibility_score=score.get("total", 0),
+                        relevance_confidence=assessment.get("relevance_confidence", 0),
+                    )
+                if result.get("success"):
+                    task_id = result.get("task_id", "")
+                    st.success(
+                        f"Production task created! Task ID: {task_id}. "
+                        f"Check Jobs for progress."
+                    )
+                    st.session_state["nav_view"] = "jobs"
+                    st.session_state["vo_highlight_task_id"] = task_id
+                else:
+                    st.error(
+                        f"Production failed: {result.get('message', 'Unknown error')}"
+                    )
                 st.rerun()
         else:
             st.caption("🔒 Create Video available only for VISUALLY_PRODUCIBLE topics")

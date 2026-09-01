@@ -284,3 +284,35 @@ def api_visual_opportunity_analyze(
     except Exception as exc:
         logger.error(f"api_visual_opportunity_analyze failed: {exc}")
         return {"success": False, "message": str(exc)}
+
+
+def api_content_factory_produce(
+    topic: str,
+    visual_concepts: list[dict[str, Any]] | None = None,
+    visual_feasibility_score: float = 0.0,
+    relevance_confidence: float = 0.0,
+    language: str = "id",
+    video_aspect: str = "portrait",
+    preferred_providers: list[str] | None = None,
+) -> dict:
+    """Produce a video from a validated visual opportunity via Content Factory."""
+    base_url = _get_api_base_url()
+    try:
+        resp = httpx.post(
+            f"{base_url}/api/v1/content-factory/produce",
+            json={
+                "topic": topic,
+                "visual_concepts": visual_concepts or [],
+                "visual_feasibility_score": visual_feasibility_score,
+                "relevance_confidence": relevance_confidence,
+                "language": language,
+                "video_aspect": video_aspect,
+                "preferred_providers": preferred_providers or ["pexels", "pixabay", "coverr"],
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json().get("data", {})
+    except Exception as exc:
+        logger.error(f"api_content_factory_produce failed: {exc}")
+        return {"success": False, "message": str(exc)}

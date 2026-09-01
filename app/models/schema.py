@@ -734,3 +734,43 @@ class VisualOpportunityResponseData(BaseModel):
 
 class VisualOpportunityResponse(BaseResponse):
     data: VisualOpportunityResponseData
+
+
+# ---------------------------
+# ----- CONTENT FACTORY -----
+# ---------------------------
+class ContentFactoryProduceRequest(BaseModel):
+    """Request to produce a video from a validated visual opportunity."""
+
+    topic: str = Field(description="The topic to produce a video about")
+    visual_concepts: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Visual concepts from Phase 12 assessment",
+    )
+    visual_feasibility_score: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Visual feasibility score from Phase 12",
+    )
+    relevance_confidence: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Relevance confidence from Phase 12",
+    )
+    language: str = Field(default="id", description="Target language")
+    video_aspect: str = Field(default="portrait", description="Target aspect ratio")
+    preferred_providers: list[str] | None = Field(
+        default=None,
+        description="Override provider preference",
+    )
+
+
+class ContentFactoryProduceResponseData(BaseModel):
+    task_id: str = ""
+    spec_id: str = ""
+    status: str = ""  # created | exists | rejected | failed
+    message: str = ""
+    success: bool = False
+    errors: list[str] = Field(default_factory=list)
+
+
+class ContentFactoryResponse(BaseResponse):
+    data: ContentFactoryProduceResponseData
