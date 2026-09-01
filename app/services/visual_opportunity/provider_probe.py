@@ -4,6 +4,10 @@ Probes the actual configured stock-footage providers (Pexels, Pixabay,
 Coverr) for visual candidates and records observed evidence.
 
 Reuses the existing material provider implementations.
+
+Each candidate is now relevance-checked against its visual concept and
+the original topic. Only candidates that are genuinely relevant to the
+topic's visual concepts count toward producibility.
 """
 
 from __future__ import annotations
@@ -17,6 +21,11 @@ from app.services.visual_opportunity.models import (
     CandidateRejectionReason,
     ProviderAvailability,
     VisualCandidate,
+)
+from app.services.visual_opportunity.relevance import (
+    RelevanceLevel,
+    compute_candidate_relevance,
+    compute_query_topic_relevance,
 )
 
 # Target output is 9:16 portrait short-form video
@@ -43,6 +52,19 @@ def _extract_dimensions(info: MaterialInfo) -> tuple[int, int]:
         w = int(rendition.get("width", 0) or 0)
         h = int(rendition.get("height", 0) or 0)
     return w, h
+
+
+def _extract_metadata(info: MaterialInfo) -> dict[str, Any]:
+    """Extract relevance-checking metadata from a MaterialInfo."""
+    if not info.source_info:
+        return {}
+    return {
+        "title": info.source_info.get("title"),
+        "description": info.source_info.get("description"),
+        "tags": info.source_info.get("tags", []),
+        "category": info.source_info.get("category"),
+        "source_page": info.source_info.get("source_page"),
+    }
 
 
 def _classify_candidate(info: MaterialInfo) -> VisualCandidate:
@@ -111,11 +133,16 @@ def probe_provider(
     query: str,
     minimum_duration: int = 3,
     llm_client: Any = None,
+    topic: str = "",
+    concept_id: str = "",
 ) -> ProviderAvailability:
     """Probe a single provider for a single query.
 
     Calls the real provider API via the existing material search functions.
     Records observed evidence only — no fabrication.
+
+    Each candidate is relevance-checked against the visual concept and
+    the original topic. Only relevant candidates count toward producibility.
     """
     availability = ProviderAvailability(provider=provider, query=query)
     start = time.monotonic()
@@ -138,12 +165,53 @@ def probe_provider(
     availability.response_time_ms = (time.monotonic() - start) * 1000
     availability.raw_count = len(raw_results)
 
+    # Compute query-topic relevance once per probe.
+    qt_relevance = compute_query_topic_relevance(query, topic) if topic else 0.5
+
     rejection_counts: dict[str, int] = {}
     samples: list[VisualCandidate] = []
+    relevance_counts: dict[str, int] = {}
 
     for info in raw_results:
         candidate = _classify_candidate(info)
-        if candidate.usable:
+        if not candidate.usable:
+            availability.rejected_count += 1
+            reason = candidate.rejection_reason.value if candidate.rejection_reason else "UNKNOWN"
+            rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+            continue
+
+        # --- Relevance checking ---
+        from app.services.visual_opportunity.models import VisualConcept
+
+        concept = VisualConcept(
+            concept_id=concept_id or "",
+            term=query,
+            source="topic",
+            parent_topic=topic,
+        )
+        metadata = _extract_metadata(info)
+        rel_score, rel_level, rel_explanation = compute_candidate_relevance(
+            candidate=candidate,
+            concept=concept,
+            topic=topic,
+            metadata=metadata,
+            llm_client=llm_client,
+        )
+
+        # Store relevance on the candidate via metadata dict.
+        if candidate.source_info is None:
+            candidate.source_info = {}
+        candidate.source_info["relevance_score"] = round(rel_score, 4)
+        candidate.source_info["relevance_level"] = rel_level.value
+        candidate.source_info["relevance_explanation"] = rel_explanation
+
+        relevance_counts[rel_level.value] = relevance_counts.get(rel_level.value, 0) + 1
+
+        # Only count relevant candidates toward producibility.
+        if rel_level in (
+            RelevanceLevel.STRONG_RELEVANCE,
+            RelevanceLevel.PARTIAL_RELEVANCE,
+        ):
             availability.usable_count += 1
             if candidate.is_portrait or candidate.is_square:
                 availability.native_portrait_count += 1
@@ -151,13 +219,22 @@ def probe_provider(
                 availability.reframable_landscape_count += 1
             if len(samples) < _MAX_SAMPLE_CANDIDATES:
                 samples.append(candidate)
+        elif rel_level == RelevanceLevel.WEAK_RELEVANCE:
+            # Weak relevance: count as usable but don't boost portrait/reframe.
+            availability.usable_count += 1
+            if len(samples) < _MAX_SAMPLE_CANDIDATES:
+                samples.append(candidate)
         else:
+            # IRRELEVANT or UNKNOWN: reject for producibility.
             availability.rejected_count += 1
-            reason = candidate.rejection_reason.value if candidate.rejection_reason else "UNKNOWN"
-            rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+            rejection_counts["IRRELEVANT_TO_TOPIC"] = (
+                rejection_counts.get("IRRELEVANT_TO_TOPIC", 0) + 1
+            )
 
     availability.rejection_reasons = rejection_counts
     availability.sample_candidates = samples
+    availability.relevance_counts = relevance_counts
+    availability.query_topic_relevance = round(qt_relevance, 4)
     availability.checked_at = datetime.now(timezone.utc)
     return availability
 

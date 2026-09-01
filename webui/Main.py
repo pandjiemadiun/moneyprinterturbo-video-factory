@@ -6954,11 +6954,12 @@ def _display_visual_assessments(assessments: list, filter_option: str):
 
 
 def _render_single_visual_assessment(assessment: dict, index: int):
-    """Render a single visual opportunity assessment."""
+    """Render a single visual opportunity assessment with relevance evidence."""
     topic = assessment.get("topic", "Unknown")
     status = assessment.get("status", "CHECK_FAILED")
     score = assessment.get("feasibility_score", {})
     total_score = score.get("total", 0) * 100
+    relevance_confidence = assessment.get("relevance_confidence", 0)
 
     # Status icon
     status_icon = {
@@ -6979,47 +6980,81 @@ def _render_single_visual_assessment(assessment: dict, index: int):
         # Score bar
         st.progress(total_score / 100, text=f"Visual Feasibility: {total_score:.0f}/100")
 
+        # Relevance confidence (NEW)
+        st.progress(
+            relevance_confidence,
+            text=f"Relevance Confidence: {relevance_confidence:.0%}",
+        )
+
         # Score explanation
         explanation = score.get("explanation", "")
         if explanation:
             st.caption(explanation)
 
+        # Relevance summary (NEW)
+        total_relevant = assessment.get("total_relevant", 0)
+        total_strong = assessment.get("total_strong_relevance", 0)
+        total_partial = assessment.get("total_partial_relevance", 0)
+        total_weak = assessment.get("total_weak_relevance", 0)
+        total_irrelevant = assessment.get("total_irrelevant", 0)
+        total_usable = assessment.get("total_usable", 0)
+        total_rejected = assessment.get("total_rejected", 0)
+
+        rcol1, rcol2, rcol3, rcol4, rcol5 = st.columns(5)
+        with rcol1:
+            st.caption(f"Relevant: {total_relevant}")
+        with rcol2:
+            st.caption(f"Strong: {total_strong}")
+        with rcol3:
+            st.caption(f"Partial: {total_partial}")
+        with rcol4:
+            st.caption(f"Weak: {total_weak}")
+        with rcol5:
+            st.caption(f"Irrelevant: {total_irrelevant}")
+
         # Provider evidence
         provider_avail = assessment.get("provider_availability", [])
         if provider_avail:
             st.markdown("**Provider Evidence:**")
-            pcols = st.columns(len(provider_avail))
-            for j, pa in enumerate(provider_avail):
-                with pcols[j]:
-                    prov = pa.get("provider", "?")
-                    pstatus = pa.get("status", "OK")
-                    usable = pa.get("usable_count", 0)
-                    portrait = pa.get("native_portrait_count", 0)
-                    reframe = pa.get("reframable_landscape_count", 0)
-                    raw = pa.get("raw_count", 0)
+            for pa in provider_avail:
+                prov = pa.get("provider", "?")
+                pstatus = pa.get("status", "OK")
+                query = pa.get("query", "?")
+                usable = pa.get("usable_count", 0)
+                portrait = pa.get("native_portrait_count", 0)
+                reframe = pa.get("reframable_landscape_count", 0)
+                raw = pa.get("raw_count", 0)
+                qt_rel = pa.get("query_topic_relevance", 0)
+                rel_counts = pa.get("relevance_counts", {})
 
-                    if pstatus == "OK":
-                        st.markdown(f"**{prov}** ✓")
-                        st.caption(f"{usable} usable (of {raw})")
-                        st.caption(f"{portrait} portrait")
-                        st.caption(f"{reframe} reframe")
-                    elif pstatus == "NOT_CONFIGURED":
-                        st.markdown(f"**{prov}** ⚪")
-                        st.caption("Not configured")
-                    else:
-                        st.markdown(f"**{prov}** 🔴")
-                        st.caption(f"{pstatus}: {pa.get('error_message', '')[:50]}")
+                if pstatus == "OK":
+                    strong = rel_counts.get("STRONG_RELEVANCE", 0)
+                    partial = rel_counts.get("PARTIAL_RELEVANCE", 0)
+                    st.markdown(
+                        f"**{prov}** ✓ | query: *{query}* | "
+                        f"qt-rel: {qt_rel:.2f} | {usable} usable (of {raw}) | "
+                        f"strong:{strong} partial:{partial} | "
+                        f"portrait:{portrait} reframe:{reframe}"
+                    )
+                elif pstatus == "NOT_CONFIGURED":
+                    st.markdown(f"**{prov}** ⚪ | Not configured")
+                else:
+                    st.markdown(f"**{prov}** 🔴 | {pstatus}: {pa.get('error_message', '')[:50]}")
 
         # Totals row
         tcol1, tcol2, tcol3, tcol4 = st.columns(4)
         with tcol1:
-            st.caption(f"Usable: {assessment.get('total_usable', 0)}")
+            st.caption(f"Usable: {total_usable}")
         with tcol2:
             st.caption(f"Portrait: {assessment.get('total_native_portrait', 0)}")
         with tcol3:
             st.caption(f"Reframable: {assessment.get('total_reframable_landscape', 0)}")
         with tcol4:
-            st.caption(f"Concepts covered: {assessment.get('concepts_with_material', 0)}/{assessment.get('concepts_with_material', 0) + assessment.get('concepts_without_material', 0)}")
+            st.caption(
+                f"Concepts: {assessment.get('concepts_with_strong_material', 0)}/"
+                f"{assessment.get('concepts_with_material', 0)}/"
+                f"{len(assessment.get('concepts', []))}"
+            )
 
         # Visual concepts
         concepts = assessment.get("concepts", [])
@@ -7042,10 +7077,10 @@ def _render_single_visual_assessment(assessment: dict, index: int):
         if score:
             with st.expander("Score Breakdown", expanded=False):
                 components = [
+                    ("Relevance", score.get("relevance_score", 0)),
                     ("Quantity", score.get("quantity_score", 0)),
                     ("Provider Diversity", score.get("provider_diversity_score", 0)),
                     ("Portrait Readiness", score.get("portrait_readiness_score", 0)),
-                    ("Resolution", score.get("resolution_sufficiency_score", 0)),
                     ("Scene Diversity", score.get("scene_diversity_score", 0)),
                     ("Provider Health", score.get("provider_health_score", 0)),
                 ]

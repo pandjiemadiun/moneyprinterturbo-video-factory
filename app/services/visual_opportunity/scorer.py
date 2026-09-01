@@ -6,7 +6,9 @@ for a content opportunity.
 All component scores are bounded [0, 1]. The total is a weighted sum
 also bounded [0, 1].
 
-Weights are documented and configurable.
+The relevance component is critical: it ensures that generic footage
+cannot inflate a topic's score. Only genuinely relevant footage
+contributes to producibility.
 """
 
 from __future__ import annotations
@@ -19,20 +21,21 @@ from app.services.visual_opportunity.models import (
     VisualFeasibilityScore,
     VisualFeasibilityStatus,
 )
+from app.services.visual_opportunity.relevance import relevance_level_to_score
 
 # --- Scoring weights (must sum to 1.0) ---
-WEIGHT_QUANTITY = 0.25
-WEIGHT_PROVIDER_DIVERSITY = 0.20
-WEIGHT_PORTRAIT_READINESS = 0.20
-WEIGHT_RESOLUTION_SUFFICIENCY = 0.10
+WEIGHT_RELEVANCE = 0.30        # NEW: relevance is the strongest signal
+WEIGHT_QUANTITY = 0.15
+WEIGHT_PROVIDER_DIVERSITY = 0.15
+WEIGHT_PORTRAIT_READINESS = 0.15
 WEIGHT_SCENE_DIVERSITY = 0.15
 WEIGHT_PROVIDER_HEALTH = 0.10
 
 DEFAULT_WEIGHTS = {
+    "relevance": WEIGHT_RELEVANCE,
     "quantity": WEIGHT_QUANTITY,
     "provider_diversity": WEIGHT_PROVIDER_DIVERSITY,
     "portrait_readiness": WEIGHT_PORTRAIT_READINESS,
-    "resolution_sufficiency": WEIGHT_RESOLUTION_SUFFICIENCY,
     "scene_diversity": WEIGHT_SCENE_DIVERSITY,
     "provider_health": WEIGHT_PROVIDER_HEALTH,
 }
@@ -42,6 +45,10 @@ DEFAULT_WEIGHTS = {
 GATE_PRODUCIBLE_MIN_SCORE = 60.0
 GATE_LIMITED_MIN_SCORE = 30.0
 
+# Minimum RELEVANT candidates for PRODUCIBLE (not just any candidates)
+GATE_PRODUCIBLE_MIN_RELEVANT = 5
+GATE_LIMITED_MIN_RELEVANT = 2
+
 # Minimum usable candidates for PRODUCIBLE
 GATE_PRODUCIBLE_MIN_USABLE = 8
 GATE_LIMITED_MIN_USABLE = 3
@@ -49,6 +56,43 @@ GATE_LIMITED_MIN_USABLE = 3
 # For PRODUCIBLE: need native portrait OR enough reframable landscape
 GATE_PRODUCIBLE_MIN_PORTRAIT = 2
 GATE_PRODUCIBLE_MIN_REFRAMABLE = 4
+
+# Relevance confidence threshold: below this, a topic cannot be PRODUCIBLE
+# even if raw counts are high.
+GATE_MIN_RELEVANCE_CONFIDENCE = 0.35
+
+
+def compute_relevance_score(
+    provider_availability: list[ProviderAvailability],
+) -> float:
+    """Compute overall relevance confidence.
+
+    Based on the distribution of relevance levels across all providers.
+    Strong relevance counts fully, partial counts partially, weak/irrelevant
+    do not contribute.
+
+    Returns a score in [0, 1].
+    """
+    if not provider_availability:
+        return 0.0
+
+    total_weighted = 0.0
+    total_count = 0
+
+    for pa in provider_availability:
+        for level_str, count in pa.relevance_counts.items():
+            try:
+                from app.services.visual_opportunity.relevance import RelevanceLevel
+                level = RelevanceLevel(level_str)
+            except ValueError:
+                continue
+            weight = relevance_level_to_score(level)
+            total_weighted += weight * count
+            total_count += count
+
+    if total_count == 0:
+        return 0.0
+    return min(1.0, total_weighted / total_count)
 
 
 def compute_quantity_score(total_usable: int) -> float:
@@ -96,21 +140,6 @@ def compute_portrait_readiness_score(
     reframable_score = min(1.0, total_reframable_landscape / 8.0)
 
     return 0.6 * native_score + 0.2 * reframable_score + 0.2 * portrait_ratio
-
-
-def compute_resolution_sufficiency_score(
-    provider_availability: list[ProviderAvailability],
-) -> float:
-    """Score based on resolution sufficiency of usable candidates.
-
-    Since only usable candidates pass the resolution gate, this
-    reflects what fraction of raw candidates were usable (resolution ok).
-    """
-    total_raw = sum(p.raw_count for p in provider_availability)
-    total_usable = sum(p.usable_count for p in provider_availability)
-    if total_raw <= 0:
-        return 0.0
-    return min(1.0, total_usable / total_raw)
 
 
 def compute_scene_diversity_score(
@@ -163,20 +192,20 @@ def compute_visual_feasibility(
         p.reframable_landscape_count for p in provider_availability
     )
 
+    relevance = compute_relevance_score(provider_availability)
     quantity = compute_quantity_score(total_usable)
     diversity = compute_provider_diversity_score(provider_availability)
     portrait = compute_portrait_readiness_score(
         total_usable, total_native_portrait, total_reframable_landscape
     )
-    resolution = compute_resolution_sufficiency_score(provider_availability)
     scene = compute_scene_diversity_score(concepts, provider_availability)
     health = compute_provider_health_score(provider_availability)
 
     total = (
-        WEIGHT_QUANTITY * quantity
+        WEIGHT_RELEVANCE * relevance
+        + WEIGHT_QUANTITY * quantity
         + WEIGHT_PROVIDER_DIVERSITY * diversity
         + WEIGHT_PORTRAIT_READINESS * portrait
-        + WEIGHT_RESOLUTION_SUFFICIENCY * resolution
         + WEIGHT_SCENE_DIVERSITY * scene
         + WEIGHT_PROVIDER_HEALTH * health
     )
@@ -184,16 +213,16 @@ def compute_visual_feasibility(
 
     explanation = _build_explanation(
         total_usable, total_native_portrait, total_reframable_landscape,
-        quantity, diversity, portrait, resolution, scene, health,
+        relevance, quantity, diversity, portrait, scene, health,
         len(provider_availability),
     )
 
     return VisualFeasibilityScore(
         total=round(total, 4),
+        relevance_score=round(relevance, 4),
         quantity_score=round(quantity, 4),
         provider_diversity_score=round(diversity, 4),
         portrait_readiness_score=round(portrait, 4),
-        resolution_sufficiency_score=round(resolution, 4),
         scene_diversity_score=round(scene, 4),
         provider_health_score=round(health, 4),
         explanation=explanation,
@@ -206,10 +235,10 @@ def _build_explanation(
     total_usable: int,
     total_native_portrait: int,
     total_reframable_landscape: int,
+    relevance: float,
     quantity: float,
     diversity: float,
     portrait: float,
-    resolution: float,
     scene: float,
     health: float,
     num_providers: int,
@@ -217,6 +246,7 @@ def _build_explanation(
     """Build a human-readable explanation of the score."""
     parts: list[str] = []
 
+    parts.append(f"relevance: {relevance:.0%}")
     if total_usable > 0:
         parts.append(
             f"{total_usable} usable candidates found "
@@ -241,11 +271,13 @@ def apply_production_gate(
     total_native_portrait: int,
     total_reframable_landscape: int,
     provider_availability: list[ProviderAvailability],
+    relevance_confidence: float = 0.0,
+    total_relevant: int = 0,
 ) -> VisualFeasibilityStatus:
     """Apply the hard production feasibility gate.
 
     Returns one of:
-      VISUALLY_PRODUCIBLE — passes all minimum thresholds
+      VISUALLY_PRODUCIBLE — passes all minimum thresholds including relevance
       VISUALLY_LIMITED     — some material but below ideal
       NOT_VISUALLY_PRODUCIBLE — insufficient material
       CHECK_FAILED         — all providers failed
@@ -260,10 +292,19 @@ def apply_production_gate(
 
     score_100 = score.total * 100
 
-    # VISUALLY_PRODUCIBLE: passes all minimum thresholds
+    # Gate: relevance confidence must be sufficient.
+    # High raw count CANNOT override poor relevance.
+    if relevance_confidence < GATE_MIN_RELEVANCE_CONFIDENCE:
+        # Even with high counts, low relevance means NOT_PRODUCIBLE.
+        if score_100 >= GATE_LIMITED_MIN_SCORE and total_usable >= GATE_LIMITED_MIN_USABLE:
+            return VisualFeasibilityStatus.VISUALLY_LIMITED
+        return VisualFeasibilityStatus.NOT_VISUALLY_PRODUCIBLE
+
+    # VISUALLY_PRODUCIBLE: passes all minimum thresholds INCLUDING relevance.
     if (
         score_100 >= GATE_PRODUCIBLE_MIN_SCORE
         and total_usable >= GATE_PRODUCIBLE_MIN_USABLE
+        and total_relevant >= GATE_PRODUCIBLE_MIN_RELEVANT
         and (
             total_native_portrait >= GATE_PRODUCIBLE_MIN_PORTRAIT
             or total_reframable_landscape >= GATE_PRODUCIBLE_MIN_REFRAMABLE
@@ -275,6 +316,7 @@ def apply_production_gate(
     if (
         score_100 >= GATE_LIMITED_MIN_SCORE
         and total_usable >= GATE_LIMITED_MIN_USABLE
+        and total_relevant >= GATE_LIMITED_MIN_RELEVANT
     ):
         return VisualFeasibilityStatus.VISUALLY_LIMITED
 

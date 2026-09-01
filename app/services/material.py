@@ -78,6 +78,51 @@ def _creator_info(value: Any) -> dict[str, str] | None:
     return creator or None
 
 
+def _parse_tags(value: Any) -> list[str]:
+    """Parse provider tags into a normalized list of lowercase tokens.
+
+    Accepts comma-separated strings or lists of strings.
+    """
+    if not value:
+        return []
+    if isinstance(value, str):
+        raw_parts = value.split(",")
+    elif isinstance(value, list):
+        raw_parts = value
+    else:
+        return []
+    tags: list[str] = []
+    for part in raw_parts:
+        tag = str(part).strip().lower()
+        if tag:
+            tags.append(tag)
+    return tags
+
+
+def _extract_title_from_url(url: Any) -> str | None:
+    """Extract a human-readable title from a provider page URL.
+
+    Used as weak relevance metadata when the provider does not supply
+    an explicit title field.
+    """
+    if not isinstance(url, str) or not url.strip():
+        return None
+    try:
+        parsed = urlsplit(url.strip())
+    except ValueError:
+        return None
+    path = parsed.path.strip("/")
+    if not path:
+        return None
+    # Take the last path segment, replace hyphens/underscores with spaces.
+    slug = path.split("/")[-1]
+    title = re.sub(r"[-_]+", " ", slug).strip()
+    # Remove common file extensions and numeric suffixes.
+    title = re.sub(r"\.\w{3,4}$", "", title)
+    title = re.sub(r"-\d+$", "", title).strip()
+    return title if title else None
+
+
 def _material_source_record(item: MaterialInfo, local_path: str) -> dict[str, Any]:
     """
     为成功下载的素材生成轻量来源记录。
@@ -608,6 +653,7 @@ def search_videos_pexels(
                             "width": w,
                             "height": h,
                         },
+                        "title": _extract_title_from_url(v.get("url")),
                     }
                     video_items.append(item)
                     break
@@ -733,6 +779,8 @@ def search_videos_pixabay(
                             "width": w,
                             "height": video.get("height"),
                         },
+                        "tags": _parse_tags(v.get("tags")),
+                        "title": _extract_title_from_url(v.get("pageURL")),
                     }
                     video_items.append(item)
                     break
@@ -844,6 +892,9 @@ def search_videos_coverr(
                     "width": v.get("max_width"),
                     "height": v.get("max_height"),
                 },
+                "title": _extract_title_from_url(
+                    v.get("canonical_url") or v.get("url")
+                ),
             }
             video_items.append(item)
         return video_items

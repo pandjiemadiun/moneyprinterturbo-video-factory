@@ -28,6 +28,7 @@ router = new_router(dependencies=[Depends(base.verify_token)])
 def _score_to_schema(score) -> VisualFeasibilityScoreSchema:
     return VisualFeasibilityScoreSchema(
         total=score.total,
+        relevance_score=score.relevance_score,
         quantity_score=score.quantity_score,
         provider_diversity_score=score.provider_diversity_score,
         portrait_readiness_score=score.portrait_readiness_score,
@@ -57,6 +58,8 @@ def _pa_to_schema(pa) -> ProviderAvailabilitySchema:
         checked_at=pa.checked_at.isoformat() if pa.checked_at else "",
         is_cached=pa.is_cached,
         response_time_ms=round(pa.response_time_ms, 1),
+        relevance_counts=dict(pa.relevance_counts),
+        query_topic_relevance=round(pa.query_topic_relevance, 4),
     )
 
 
@@ -79,6 +82,13 @@ def _assessment_to_schema(
         provider_health=dict(a.provider_health),
         checked_at=a.checked_at.isoformat() if a.checked_at else "",
         is_cached=a.is_cached,
+        total_relevant=a.total_relevant,
+        total_strong_relevance=a.total_strong_relevance,
+        total_partial_relevance=a.total_partial_relevance,
+        total_weak_relevance=a.total_weak_relevance,
+        total_irrelevant=a.total_irrelevant,
+        concepts_with_strong_material=a.concepts_with_strong_material,
+        relevance_confidence=round(a.relevance_confidence, 4),
     )
 
 

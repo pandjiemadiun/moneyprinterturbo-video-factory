@@ -674,10 +674,14 @@ class ProviderAvailabilitySchema(BaseModel):
     checked_at: str = ""
     is_cached: bool = False
     response_time_ms: float = 0.0
+    # --- Relevance ---
+    relevance_counts: dict[str, int] = Field(default_factory=dict)
+    query_topic_relevance: float = 0.0
 
 
 class VisualFeasibilityScoreSchema(BaseModel):
     total: float = 0.0
+    relevance_score: float = 0.0
     quantity_score: float = 0.0
     provider_diversity_score: float = 0.0
     portrait_readiness_score: float = 0.0
@@ -709,6 +713,14 @@ class VisualOpportunityAssessmentSchema(BaseModel):
     provider_health: dict[str, str] = Field(default_factory=dict)
     checked_at: str = ""
     is_cached: bool = False
+    # --- Relevance ---
+    total_relevant: int = 0
+    total_strong_relevance: int = 0
+    total_partial_relevance: int = 0
+    total_weak_relevance: int = 0
+    total_irrelevant: int = 0
+    concepts_with_strong_material: int = 0
+    relevance_confidence: float = 0.0
 
 
 class VisualOpportunityResponseData(BaseModel):

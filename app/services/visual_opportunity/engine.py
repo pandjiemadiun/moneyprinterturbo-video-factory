@@ -7,7 +7,6 @@ to produce visual-feasibility-aware opportunity assessments.
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,6 +24,7 @@ from app.services.visual_opportunity.query_generator import generate_visual_quer
 from app.services.visual_opportunity.scorer import (
     apply_production_gate,
     compute_visual_feasibility,
+    compute_relevance_score,
 )
 
 # Default providers to probe (in order)
@@ -47,7 +47,7 @@ class VisualOpportunityEngine:
 
     For each candidate opportunity:
       1. Generate visual search queries
-      2. Probe configured providers
+      2. Probe configured providers (with relevance checking)
       3. Compute visual feasibility score
       4. Apply production gate
     """
@@ -97,7 +97,7 @@ class VisualOpportunityEngine:
         )
         assessment.concepts = concepts
 
-        # 2. Probe providers
+        # 2. Probe providers (with relevance checking against topic)
         configured = get_configured_providers()
         providers_to_use = [p for p in self.providers if p in configured]
         if not providers_to_use:
@@ -113,6 +113,8 @@ class VisualOpportunityEngine:
                     query=concept.term,
                     minimum_duration=self.minimum_duration,
                     llm_client=self.llm_client,
+                    topic=topic,
+                    concept_id=concept.concept_id,
                 )
                 provider_availability.append(pa)
                 provider_health[provider] = pa.status
@@ -134,7 +136,31 @@ class VisualOpportunityEngine:
         )
         assessment.total_rejected = sum(p.rejected_count for p in provider_availability)
 
-        # 5. Scene coverage
+        # 5. Relevance tracking
+        assessment.total_relevant = sum(
+            p.relevance_counts.get("STRONG_RELEVANCE", 0)
+            + p.relevance_counts.get("PARTIAL_RELEVANCE", 0)
+            for p in provider_availability
+        )
+        assessment.total_strong_relevance = sum(
+            p.relevance_counts.get("STRONG_RELEVANCE", 0)
+            for p in provider_availability
+        )
+        assessment.total_partial_relevance = sum(
+            p.relevance_counts.get("PARTIAL_RELEVANCE", 0)
+            for p in provider_availability
+        )
+        assessment.total_weak_relevance = sum(
+            p.relevance_counts.get("WEAK_RELEVANCE", 0)
+            for p in provider_availability
+        )
+        assessment.total_irrelevant = sum(
+            p.relevance_counts.get("IRRELEVANT", 0)
+            for p in provider_availability
+        )
+        assessment.relevance_confidence = compute_relevance_score(provider_availability)
+
+        # 6. Scene coverage
         covered = 0
         for concept in concepts:
             term = concept.term.lower()
@@ -145,13 +171,25 @@ class VisualOpportunityEngine:
         assessment.concepts_with_material = covered
         assessment.concepts_without_material = len(concepts) - covered
 
-        # 6. Apply production gate
+        # Count concepts with STRONG material (relevance-aware)
+        strong_covered = 0
+        for concept in concepts:
+            term = concept.term.lower()
+            for pa in provider_availability:
+                if pa.relevance_counts.get("STRONG_RELEVANCE", 0) > 0 and term in pa.query.lower():
+                    strong_covered += 1
+                    break
+        assessment.concepts_with_strong_material = strong_covered
+
+        # 7. Apply production gate (with relevance confidence)
         assessment.status = apply_production_gate(
             score=score,
             total_usable=assessment.total_usable,
             total_native_portrait=assessment.total_native_portrait,
             total_reframable_landscape=assessment.total_reframable_landscape,
             provider_availability=provider_availability,
+            relevance_confidence=assessment.relevance_confidence,
+            total_relevant=assessment.total_relevant,
         )
 
         assessment.checked_at = datetime.now(timezone.utc)

@@ -65,6 +65,7 @@ class VisualCandidate:
     is_square: bool = False
     is_reframable: bool = False
     rejection_reason: CandidateRejectionReason | None = None
+    source_info: dict[str, Any] = field(default_factory=dict)
 
     @property
     def usable(self) -> bool:
@@ -80,7 +81,7 @@ class ProviderAvailability:
     status: str = "OK"  # OK | TIMEOUT | ERROR | NOT_CONFIGURED
     error_message: str = ""
     raw_count: int = 0  # total candidates returned by provider
-    usable_count: int = 0  # candidates passing quality gate
+    usable_count: int = 0  # candidates passing quality gate AND relevance
     native_portrait_count: int = 0
     reframable_landscape_count: int = 0
     rejected_count: int = 0
@@ -89,6 +90,9 @@ class ProviderAvailability:
     checked_at: datetime = field(default_factory=_utcnow)
     is_cached: bool = False
     response_time_ms: float = 0.0
+    # --- Relevance tracking ---
+    relevance_counts: dict[str, int] = field(default_factory=dict)
+    query_topic_relevance: float = 0.0
 
 
 @dataclass
@@ -110,6 +114,7 @@ class VisualFeasibilityScore:
     """
 
     total: float = 0.0  # [0, 1]
+    relevance_score: float = 0.0  # NEW: relevance confidence
     quantity_score: float = 0.0
     provider_diversity_score: float = 0.0
     portrait_readiness_score: float = 0.0
@@ -143,3 +148,11 @@ class VisualOpportunityAssessment:
     checked_at: datetime = field(default_factory=_utcnow)
     is_cached: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    # --- Relevance tracking ---
+    total_relevant: int = 0
+    total_strong_relevance: int = 0
+    total_partial_relevance: int = 0
+    total_weak_relevance: int = 0
+    total_irrelevant: int = 0
+    concepts_with_strong_material: int = 0
+    relevance_confidence: float = 0.0
