@@ -49,14 +49,25 @@ from webui.pages.create import render_create
 from webui.pages.library import render_library
 from webui.pages.settings import render_settings
 
-# The six canonical logical pages. Each callable name becomes the url_path
-# (e.g. render_review -> /render_review), matching the existing public URLs.
-discover_page = st.Page(render_discover, title="Discover", icon="🏠", default=True)
-explore_page = st.Page(render_explore, title="Explore", icon="🔎")
-review_page = st.Page(render_review, title="Review", icon="🔍")
-create_page = st.Page(render_create, title="Create", icon="🎬")
-library_page = st.Page(render_library, title="Library", icon="🎞️")
-settings_page = st.Page(render_settings, title="Settings", icon="⚙️")
+# The six canonical logical pages. Each is explicitly assigned the url_path
+# "render_<callable-name>" so the canonical /render_* public URLs are stable and
+# provable (see docs/PRODUCTION_RUNTIME_CONTRACT.md). In Streamlit 1.59.1 the
+# `url_path` of a callable-registered Page defaults to the callable name, EXCEPT
+# for the `default=True` page (Discover) whose url_path would otherwise collapse
+# to "/" and make /render_discover fall back to "Page not found". Setting it
+# explicitly on every page keeps the registry self-documenting and fixes that.
+discover_page = st.Page(render_discover, title="Discover", icon="🏠",
+                        default=True, url_path="render_discover")
+explore_page = st.Page(render_explore, title="Explore", icon="🔎",
+                       url_path="render_explore")
+review_page = st.Page(render_review, title="Review", icon="🔍",
+                      url_path="render_review")
+create_page = st.Page(render_create, title="Create", icon="🎬",
+                      url_path="render_create")
+library_page = st.Page(render_library, title="Library", icon="🎞️",
+                       url_path="render_library")
+settings_page = st.Page(render_settings, title="Settings", icon="⚙️",
+                        url_path="render_settings")
 
 # Canonical ordered list consumed by st.navigation().
 NAV_PAGES = [
