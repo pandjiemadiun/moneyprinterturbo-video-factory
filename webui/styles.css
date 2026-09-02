@@ -359,6 +359,37 @@ div[class*="st-key-cache_actions"] [data-testid="stButton"] {
     width: auto !important;                 /* let flex basis drive, not 100% */
 }
 
+/* ── Filter control group (Phase 15H, Class R1-form-controls) ─────────────
+   Root cause: Discover Filters used `st.columns(3)`, squeezing three
+   selectboxes (Geography/Language/Category) to ~46-68px on 320px so labels
+   became unreadable and the controls were practically untappable. Same
+   width-starvation class as the action-row buttons, but for form controls.
+
+   Fix (component-scoped, semantically named .mpt-filter-row): the three
+   selectboxes sit in `st.container(key="discover_filters")` and become
+   flex items with `flex: 1 1 220px; min-width: 200px`. On wide screens they
+   share the row (3-across); below ~440px each drops to its own full-width row.
+   No `@media` (inert in Streamlit 1.59); flex-wrap handles reflow. Only
+   targets `st-key-discover_filters` -- no generic stSelectbox override. */
+div[class*="st-key-discover_filters"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: var(--mpt-space-2) !important;     /* 8px between filters */
+    align-items: flex-end !important;       /* align stSelectbox widgets */
+}
+/* The direct flex children are Streamlit stElementContainer wrappers around each
+   stSelectbox (root > stElementContainer > stSelectbox). flex:1 1 220px on those
+   containers gives 3-across on wide screens, one-per-row (>=200px, full-width)
+   on mobile. Scoped to our owned container only. */
+div[class*="st-key-discover_filters"] [data-testid="stElementContainer"] {
+    flex: 1 1 220px !important;
+    min-width: 200px !important;
+    width: auto !important;
+}
+div[class*="st-key-discover_filters"] [data-testid="stSelectbox"] {
+    width: 100% !important;                 /* selectbox widget fills its container */
+}
+
 /* Raw intelligence trends fix (Phase 15H, R2) ────────────────────────────────────────────────────────
    Same class as discover_filters and quick_actions_row: flex-wrap with min-width.
    Uses a dedicated container key so the existing .mpt-filter-row / .mpt-action-row
