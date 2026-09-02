@@ -231,22 +231,23 @@ def _render_raw_intelligence(result):
     with st.expander(tr("Raw Intelligence (Advanced)"), expanded=False):
         if trends:
             st.caption(tr("Content Ideas"))
-            for i, trend in enumerate(trends[:10]):
-                cols = st.columns([3, 2, 2])
-                with cols[0]:
-                    st.markdown(f"**{trend.get('topic', 'Unknown')}**")
-                with cols[1]:
-                    st.caption(f"Strength: {trend.get('strength', 0):.2f}")
-                with cols[2]:
-                    st.caption(f"Freshness: {trend.get('freshness', 0):.2f}")
-                evidence = trend.get("evidence", []) or []
-                source_url = None
-                for ev in evidence:
-                    if isinstance(ev, str) and ev.startswith(("url=", "source_url=")):
-                        source_url = ev.split("=", 1)[1]
-                        break
-                if source_url:
-                    st.link_button("Open Source", url=source_url, key=f"discover_trend_source_{i}")
+            with st.container(key="raw_intelligence_trends"):
+                for i, trend in enumerate(trends[:10]):
+                    col1, col2, col3 = st.columns([3, 2, 2])
+                    with col1:
+                        st.markdown(f"**{trend.get('topic', 'Unknown')}**")
+                    with col2:
+                        st.caption(f"Strength: {trend.get('strength', 0):.2f}")
+                    with col3:
+                        st.caption(f"Freshness: {trend.get('freshness', 0):.2f}")
+                    evidence = trend.get("evidence", []) or []
+                    source_url = None
+                    for ev in evidence:
+                        if isinstance(ev, str) and ev.startswith(("url=", "source_url=")):
+                            source_url = ev.split("=", 1)[1]
+                            break
+                    if source_url:
+                        st.link_button("Open Source", url=source_url, key=f"discover_trend_source_{i}")
         if patterns:
             st.markdown("---")
             st.caption("Viral Patterns")

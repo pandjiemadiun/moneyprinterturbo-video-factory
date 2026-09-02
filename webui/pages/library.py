@@ -94,10 +94,7 @@ def render_library():
     # Cleanup operations
     with st.expander("Cleanup", expanded=False):
         st.write("Remove tasks by status.")
-        # Class R1 fix: st.columns(5) starved each button to ~50px on 320px and
-        # wrapped "Clear Completed" etc. into fragments. Same .mpt-action-row
-        # contract as Overview Quick Actions: min 160px, wrap to fewer columns
-        # on narrow screens, full-width on one-per-row mobile.
+        # Class R1 fix: apply the same flex-wrap pattern as Quick Actions and Discover Filters
         with st.container(key="cleanup_actions"):
             if st.button("Clear Completed", key="btn_clear_completed", type="secondary", use_container_width=True):
                 result = webui_api_client.api_clear_tasks("completed")
