@@ -150,7 +150,7 @@ def _render_task_card(task, status_key):
         status_label = "Queued"
 
     with st.container(key=f"task_card_{status_key}_{task_id}", border=True):
-        col1, col2, col3 = st.columns([3, 1, 1.5])
+        col1, col2, col3 = st.columns([3, 1, 2])
         with col1:
             # Thumbnail (real if the task summary exposes one, else a status tinted placeholder)
             thumbnail = task.get("thumbnail") or ""
