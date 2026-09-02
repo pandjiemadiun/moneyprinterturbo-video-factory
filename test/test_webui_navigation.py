@@ -300,6 +300,159 @@ def test_discover_shows_recommended_opportunities_without_network():
     assert "Fetch Live Trends" in labels, "Discover must keep Fetch Live Trends as an explicit action"
 
 
+# ---------------------------------------------------------------------------
+# Phase 14.8 — Explicit mobile navigation shell (hamburger drawer)
+# ---------------------------------------------------------------------------
+
+# Canonical page ordering + slugs from webui/nav_pages.py (single source).
+SHELL_PAGES = [
+    ("Discover", ""),
+    ("Explore", "render_explore"),
+    ("Review", "render_review"),
+    ("Create", "render_create"),
+    ("Library", "render_library"),
+    ("Settings", "render_settings"),
+]
+
+
+def _nav_open(at: AppTest) -> bool:
+    """Reliable open/closed indicator for the drawer (session_state toggle).
+
+    NOTE: we cannot use presence of ``nav_item_*`` buttons to detect closed
+    state in AppTest because a button that flips the flag mid-run is still
+    emitted by that same run -- so we read the toggle flag directly."""
+    try:
+        return bool(at.session_state["mpt_nav_drawer_open"])
+    except Exception:
+        return False
+
+
+def _nav_item_keys(at: AppTest) -> list:
+    return [b.key for b in at.button if b.key and b.key.startswith("nav_item_")]
+
+
+def test_nav_shell_renders_hamburger_on_all_six_pages():
+    """Requirement: a visible hamburger control exists on every primary page."""
+    for label, slug in SHELL_PAGES:
+        at = _load_main()
+        if slug:
+            at._page_hash = calc_hash(slug)
+        at.run()
+        assert not at.exception, f"{label} shell raised: {at.exception}"
+        keys = [b.key for b in at.button if b.key]
+        assert "nav_hamburger" in keys, f"{label}: hamburger (nav_hamburger) missing"
+
+
+def test_hamburger_opens_drawer_with_all_six_items_and_settings():
+    """Requirement: hamburger opens the navigation drawer; all 6 pages + a
+    redundant explicit Settings item are present (Settings never hidden)."""
+    at = _load_main()
+    at._page_hash = calc_hash("render_discover")
+    at.run()
+    assert not _nav_open(at)  # closed by default
+    at.button(key="nav_hamburger").click().run()  # open
+    assert _nav_open(at) is True
+    items = _nav_item_keys(at)
+    assert items == [
+        "nav_item_discover",
+        "nav_item_render_explore",
+        "nav_item_render_review",
+        "nav_item_render_create",
+        "nav_item_render_library",
+        "nav_item_render_settings",
+    ], items
+    assert "nav_item_render_settings" in items, "Settings missing from explicit nav"
+    assert "nav_settings_explicit" in [b.key for b in at.button if b.key]
+
+
+@pytest.mark.parametrize("close_via", ["nav_close", "nav_hamburger"])
+def test_open_close_reopen_drawer(close_via):
+    """Requirement: open -> close -> reopen works (explicit close + toggle)."""
+    at = _load_main()
+    at._page_hash = calc_hash("render_discover")
+    at.run()
+    # open
+    at.button(key="nav_hamburger").click().run()
+    assert _nav_open(at) is True
+    assert len(_nav_item_keys(at)) == 6
+    # close (explicit ✕ or hamburger toggle)
+    at.button(key=close_via).click().run()
+    assert _nav_open(at) is False
+    # reopen
+    at.button(key="nav_hamburger").click().run()
+    assert _nav_open(at) is True
+    assert len(_nav_item_keys(at)) == 6
+
+
+# (target_title, nav_item_key, start_slug) -- open drawer on start_slug, then
+# click the nav item to reach target_title. Each case is a SINGLE nav step
+# (AppTest re-runs the destination page after a button-click switch_page).
+SHELL_NAV_CASES = [
+    ("Explore", "nav_item_render_explore", "render_discover"),
+    ("Review", "nav_item_render_review", "render_discover"),
+    ("Create", "nav_item_render_create", "render_discover"),
+    ("Library", "nav_item_render_library", "render_discover"),
+    ("Settings", "nav_item_render_settings", "render_discover"),
+    ("Discover", "nav_item_discover", "render_settings"),
+]
+
+
+@pytest.mark.parametrize("target,nav_key,start_slug", SHELL_NAV_CASES)
+def test_drawer_navigates_to_each_target(target, nav_key, start_slug):
+    """Requirement: each menu item navigates to the registered StreamlitPage."""
+    at = _load_main()
+    if start_slug != "render_discover":
+        at._page_hash = calc_hash(start_slug)
+    at.run()
+    assert not at.exception, at.exception
+    # open the drawer, confirm it rendered the items (incl. Settings)
+    at.button(key="nav_hamburger").click().run()
+    assert "nav_item_render_settings" in _nav_item_keys(at)
+    # navigate
+    at.button(key=nav_key).click().run()
+    assert not at.exception, f"nav to {target} raised: {at.exception}"
+    # The shell header renders the active page title -> proves we landed there.
+    md = [m.value for m in at.markdown if m.value]
+    assert any(f"### {target}" in v for v in md), f"did not land on {target}"
+    # navigation closes the drawer on the destination page
+    assert _nav_open(at) is False
+
+
+def test_settings_reachable_via_explicit_settings_button():
+    """Requirement: Settings MUST be explicitly visible & reachable from the
+    drawer (the redundant Settings button, not only the loop item)."""
+    at = _load_main()
+    at._page_hash = calc_hash("render_discover")
+    at.run()
+    at.button(key="nav_hamburger").click().run()
+    at.button(key="nav_settings_explicit").click().run()
+    assert not at.exception, at.exception
+    md = [m.value for m in at.markdown if m.value]
+    assert any("### Settings" in v for v in md), "Settings explicit button did not navigate"
+
+
+def test_nav_shell_is_single_source_of_truth():
+    """Requirement: NAV_PAGES is the one source for labels/icons/targets/active."""
+    shell = _read(WEBUI / "nav_shell.py")
+    # pulls items exclusively from the canonical registry
+    assert "from webui.nav_pages import NAV_PAGES" in shell
+    assert "for page in NAV_PAGES:" in shell
+    # the redundant Settings button is also derived from NAV_PAGES
+    assert "settings_page = next(" in shell
+    # every page module wires in the shell
+    for name in ("discover", "explore", "review", "create", "library", "settings"):
+        src = _read(WEBUI / "pages" / f"{name}.py")
+        assert "from webui.nav_shell import render_nav_shell" in src, f"{name} does not import the shell"
+        assert "render_nav_shell(" in src, f"{name} does not call the shell"
+
+
+def test_no_invalid_string_switch_page_targets_in_nav_shell():
+    """Requirement: no string-based st.switch_page() calls (incl. nav_shell)."""
+    bad = re.search(r'st\.switch_page\(\s*["\']', _read(WEBUI / "nav_shell.py"))
+    assert not bad, "nav_shell.py must not call st.switch_page with a string"
+
+
+
 def test_review_renders_production_gate_and_create():
     """Review decision screen shows the production gate + Create Video primary action."""
     item = {

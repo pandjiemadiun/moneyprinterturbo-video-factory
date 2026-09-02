@@ -15,6 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
+from webui.nav_shell import render_nav_shell
+
 from app.models.llm_provider import get_llm_provider, LLM_PROVIDER_REGISTRY, DEFAULT_LLM_PROVIDER_ID
 
 from webui.shared import (
@@ -47,6 +49,7 @@ from webui.shared import (
 
 def render_settings():
     """Render the Settings page."""
+    render_nav_shell(active="render_settings")
     st.markdown(
         "<h1 style='margin-bottom: 0.25rem;'>Settings</h1>"
         "<p style='color: #64748b; margin-top: 0; margin-bottom: 1.5rem;'>"

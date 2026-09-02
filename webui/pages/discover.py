@@ -23,6 +23,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
+from webui.nav_shell import render_nav_shell
+
 from webui.shared import (
     tr, webui_api_client, _saved_ui_choice, _set_runtime_config,
 )
@@ -122,6 +124,7 @@ _CATEGORIES = ["general", "technology", "business", "sports", "entertainment", "
 
 def render_discover():
     """Render the Discover page (primary landing — 'What should I make?')."""
+    render_nav_shell(active="")
     st.markdown(
         "<h1 style='margin-bottom: 0.25rem;'>Discover</h1>"
         "<p style='color: #64748b; margin-top: 0; margin-bottom: 1rem;'>"

@@ -12,6 +12,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
+from webui.nav_shell import render_nav_shell
+
 from webui.shared import (
     tr, get_all_fonts, get_all_songs, stable_selectbox, stable_segmented_control,
     sync_script_order_concat_mode, reset_script_system_prompt, reset_subtitle_settings,
@@ -42,6 +44,7 @@ from webui.shared import (
 
 def render_create():
     """Render the Create page."""
+    render_nav_shell(active="render_create")
     st.markdown(
         "<h1 style='margin-bottom: 0.25rem;'>Create</h1>"
         "<p style='color: #64748b; margin-top: 0; margin-bottom: 1.5rem;'>"

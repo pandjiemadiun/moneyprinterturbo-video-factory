@@ -16,11 +16,14 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
+from webui.nav_shell import render_nav_shell
+
 from webui.shared import tr
 
 
 def render_review():
     """Render the Review page."""
+    render_nav_shell(active="render_review")
     item = st.session_state.get("review_item")
 
     if item is None:

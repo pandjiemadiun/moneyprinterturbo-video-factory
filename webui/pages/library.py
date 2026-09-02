@@ -12,6 +12,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
+from webui.nav_shell import render_nav_shell
+
 from webui.shared import (
     tr, collect_task_summaries, task_state_filter_key, format_task_time, format_task_subject,
     delete_task, open_task_path, open_task_video, build_video_download_name,
@@ -23,6 +25,7 @@ from webui.shared import (
 
 def render_library():
     """Render the Library page."""
+    render_nav_shell(active="render_library")
     st.markdown(
         "<h1 style='margin-bottom: 0.25rem;'>Library</h1>"
         "<p style='color: #64748b; margin-top: 0; margin-bottom: 1.5rem;'>"

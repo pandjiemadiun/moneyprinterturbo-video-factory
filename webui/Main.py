@@ -41,26 +41,9 @@ streamlit_style = f"<style>{style_file.read_text(encoding='utf-8')}</style>"
 st.markdown(streamlit_style, unsafe_allow_html=True)
 
 # ── Shared initialization (session state, locales, helpers) ────────────────
-from webui.shared import initialize_session_state, tr, locales
+from webui.shared import initialize_session_state
 
 initialize_session_state()
-
-# ── Language selector (persisted across pages) ──────────────────────────────
-language_codes = list(locales.keys())
-current_language = st.session_state.get("ui_language", "")
-if current_language not in language_codes:
-    current_language = language_codes[0] if language_codes else "en"
-
-selected_language = st.sidebar.selectbox(
-    "Language / 语言",
-    options=language_codes,
-    index=language_codes.index(current_language) if current_language in language_codes else 0,
-    format_func=lambda code: code.split("-")[0].upper(),
-    key="global_language_selector",
-)
-if selected_language != st.session_state.get("ui_language", ""):
-    st.session_state["ui_language"] = selected_language
-    st.rerun()
 
 # ── Navigation ──────────────────────────────────────────────────────────────
 # Page objects are defined exactly once in the canonical registry
@@ -68,11 +51,16 @@ if selected_language != st.session_state.get("ui_language", ""):
 # programmatic navigation via st.switch_page(<StreamlitPage object>).
 # DO NOT pass bare strings to st.switch_page() for callable-registered pages:
 # Streamlit resolves a string as a file path and raises StreamlitAPIException.
+#
+# position="hidden" removes Streamlit's own sidebar page-nav (which hid Settings
+# behind a swipe gesture on mobile). The EXPLICIT application navigation shell
+# (hamburger drawer) now lives in webui/nav_shell.py, which reuses NAV_PAGES.
+# The Language selector also moved there, so the only hamburger is the shell's.
 from webui.nav_pages import NAV_PAGES
 
 pg = st.navigation(
     NAV_PAGES,
-    position="sidebar",
+    position="hidden",
 )
 
 pg.run()
