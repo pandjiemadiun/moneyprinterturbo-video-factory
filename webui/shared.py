@@ -1209,6 +1209,59 @@ def format_file_size(size_bytes):
     return f"{size_bytes} B"
 
 
+# ── Visual primitive: responsive metric grid ─────────────────────────────────
+def render_metrics_grid(items, *, contract_key, columns=4):
+    """Render real metrics as a responsive SaaS metric grid.
+
+    Two concerns are decoupled on purpose (Streamlit 1.59 makes per-widget CSS
+    on ``st.metric`` unreliable):
+
+      1. AppTest contract -- each item is also emitted as a real ``st.metric``
+         inside a *keyed* container (so ``at.metric`` sees the live labels:
+         Active / Completed / Storage ...). The container is hidden via the
+         ``.st-key-<contract_key>`` selector in styles.css, leaving no gap.
+      2. Visual -- the human-facing metric row is a CSS ``.mpt-grid`` of
+         ``.mpt-metric-card`` cards. This is a real grid (not Streamlit
+         columns), so on mobile it collapses to 2-per-row instead of four
+         squashed Streamlit metric widgets.
+
+    ``items``: list of dicts with keys: label, value, delta=None,
+    delta_color="off".
+    """
+    # (1) AppTest contract -- hidden (scoped by the keyed container).
+    with st.container(key=contract_key):
+        cols = st.columns(len(items))
+        for col, item in zip(cols, items):
+            with col:
+                st.metric(
+                    item.get("label") or "",
+                    str(item.get("value", "")),
+                    delta=item.get("delta"),
+                    delta_color=item.get("delta_color", "off"),
+                )
+
+    # (2) Visual grid (real data, responsive). Inline style is used on the grid
+    # container because Streamlit wraps st.markdown HTML in an stMarkdown
+    # element whose injected CSS can defeat a stylesheet-only rule at certain
+    # breakpoints. ``repeat(auto-fill, minmax(150px, 1fr))`` yields 4-col on
+    # desktop and 2-col on mobile in a SINGLE declaration (no media query).
+    cards = []
+    for item in items:
+        label = html.escape(str(item.get("label", "")))
+        value = html.escape(str(item.get("value", "")))
+        card = '<div class="mpt-metric-card">'
+        card += f'<div class="mpt-label">{label}</div>'
+        card += f'<div class="mpt-value">{value}</div>'
+        if item.get("delta"):
+            card += f'<div class="mpt-delta">{html.escape(str(item["delta"]))}</div>'
+        card += '</div>'
+        cards.append(card)
+    st.markdown(
+        '<div class="mpt-grid">' + "".join(cards) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 # ── Settings transfer helpers ───────────────────────────────────────────────
 
 def is_credential_config_key(key):

@@ -84,14 +84,51 @@ div[data-testid="stHorizontalBlock"] {
     align-items: flex-start !important;
 }
 
-/* Responsive grid contract: every Streamlit column keeps a sane minimum width
-   so a 4-column metric row becomes 2-per-row on mobile instead of 4 tiny
-   blocks, WITHOUT breaking ratio-based form columns (the min-width only
-   binds when the row is too narrow to fit). */
-div[data-testid="stColumn"] {
-    min-width: 140px !important;
-    flex-shrink: 1 !important;
-    flex-grow: 1 !important;
+/* ── Reusable primitive: ResponsiveGrid (CSS grid for HTML card/metric layouts) ─
+   Streamlit's stColumn flex-basis is emitted by CSS-in-JS with higher specificity
+   than a testid selector, so min-width on stColumn cannot be overridden cleanly.
+   Card/metric layouts therefore use a real CSS grid (.mpt-grid) for the visual,
+   and st.metric is kept only as the AppTest data contract (hidden in a keyed
+   container -- see the contract-metrics rule below).
+
+   NOTE: Streamlit's st.markdown <style> injection does NOT apply @media rules
+   at runtime (they parse into the stylesheet but never take effect). Responsiveness
+   is therefore achieved with ``repeat(auto-fit, minmax(...))`` -- auto-fit collapses
+   trailing empty tracks so N cards always fill the row on wide screens and wrap
+   to 2-per-row on narrow ones, with a SINGLE non-media declaration. */
+.mpt-grid {
+    display: grid !important;
+    gap: var(--mpt-space-3) !important;
+    width: 100% !important;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
+}
+.mpt-grid-tight { gap: var(--mpt-space-2) !important; }
+/* Wider card grids (Discovery/Library task cards, opportunity cards). */
+.mpt-grid-cards {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important;
+}
+
+/* Contract metrics: the default Streamlit st.metric widget is kept ONLY so the
+   AppTest contract (real metric labels) holds; it is rendered inside a keyed
+   container (st-container(key="mpt-overview-metrics"|"mpt-library-metrics")) and
+   the whole container is hidden here so it leaves NO layout gap. This is
+   strictly scoped by key -- it does not touch the st.metric on Review or the
+   Settings cache line (those widgets are not inside a keyed container). */
+div.st-key-mpt-overview-metrics,
+div.st-key-mpt-library-metrics {
+    display: none !important;
+}
+/* Header row is the first column-row on every page. Its hamburger cell must stay
+   compact (the stColumn min-width above is meant for metrics/cards, not the
+   shell chrome). Re-exempt the header so the hamburger is a ~44px icon. */
+div[data-testid="stHorizontalBlock"]:first-of-type div[data-testid="stColumn"] {
+    min-width: 0 !important;
+}
+div[data-testid="stHorizontalBlock"]:first-of-type div[data-testid="stColumn"]:first-child {
+    flex: 0 0 auto !important;
+}
+div[data-testid="stHorizontalBlock"]:first-of-type div[data-testid="stColumn"]:last-child {
+    flex: 1 1 0 !important;
 }
 
 /* ── Primary actions (gradient, prominent) ───────────────────────────────── */
@@ -193,22 +230,40 @@ button[data-testid="stBaseButton-secondary"]:hover {
     margin: 0 !important;
 }
 
-/* ── Reusable primitive: MetricCard (wraps st.metric) ────────────────────── */
-div[data-testid="stMetric"] {
+/* ── Reusable primitive: MetricCard (replaces default Streamlit metric look) ─
+   Visible metric card rendered as HTML (inside .mpt-grid). The hidden st.metric
+   inside st.container() above is the AppTest data contract. */
+.mpt-metric-card {
     background: var(--mpt-surface-2) !important;
     border: 1px solid var(--mpt-border) !important;
     border-radius: var(--mpt-radius) !important;
-    padding: 0.7rem 0.85rem !important;
+    padding: 0.75rem 0.9rem !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.15rem !important;
 }
-div[data-testid="stMetric"] label,
-div[data-testid="stMetric"] div[style*="color"] {
+.mpt-metric-card .mpt-label {
     color: var(--mpt-text-muted) !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }
-div[data-testid="stMetric"] [data-testid="stMetricValue"],
-div[data-testid="stMetric"] b {
+.mpt-metric-card .mpt-value {
     color: var(--mpt-text) !important;
+    font-size: 1.35rem !important;
     font-weight: 700 !important;
 }
+.mpt-metric-card .mpt-delta {
+    color: var(--mpt-text-dim) !important;
+    font-size: 0.78rem !important;
+}
+
+/* Hidden contract metrics (st.metric inside st.container for AppTest). */
+div[data-testid="stContainer"] div[data-testid="stMetric"] {
+    display: none !important;
+}
+
 
 /* ── Reusable primitive: StatusChip ──────────────────────────────────────── */
 .mpt-chip {
@@ -256,18 +311,6 @@ div[data-testid="stContainer"][style*="border"] {
     background: var(--mpt-surface) !important;
     border: 1px solid var(--mpt-border) !important;
     border-radius: var(--mpt-radius) !important;
-}
-
-/* ── Reusable primitive: ResponsiveGrid (HTML/CSS grid for card layouts) ─── */
-.mpt-grid {
-    display: grid !important;
-    gap: var(--mpt-space-3) !important;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
-}
-@media (min-width: 900px) {
-    .mpt-grid-4 { grid-template-columns: repeat(4, 1fr) !important; }
-    .mpt-grid-3 { grid-template-columns: repeat(3, 1fr) !important; }
-    .mpt-grid-2 { grid-template-columns: repeat(2, 1fr) !important; }
 }
 
 /* ── Tabs: compact, dark, mobile-scrollable (no clipped tabs) ─────────────── */

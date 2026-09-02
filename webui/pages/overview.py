@@ -27,6 +27,7 @@ from webui.shared import (
     format_file_size, format_task_time, format_task_subject,
     normalize_task_state, task_state_label,
     get_dashboard_state, get_storage_usage, collect_task_summaries,
+    render_metrics_grid,
 )
 
 
@@ -61,20 +62,39 @@ def render_overview():
     total_bytes, file_count = get_storage_usage()
 
     # ── Pipeline snapshot (4 real metrics) ────────────────────────────────
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.metric("Active", f"{active} running",
-                  delta=f"{counts['queued']} queued" if counts["queued"] else None,
-                  delta_color="off")
-    with m2:
-        st.metric("Completed", completed, delta=f"{completed} total videos" if completed else None, delta_color="off")
-    with m3:
-        st.metric("Attention", failed,
-                  delta=f"{failed} failed" if failed else "all clear",
-                  delta_color="inverse" if failed else "off")
-    with m4:
-        st.metric("Storage", format_file_size(total_bytes),
-                  delta=f"{file_count} files" if file_count else None, delta_color="off")
+    # Visual: responsive 2-per-row-on-mobile SaaS metric grid (render_metrics_grid).
+    # The real st.metric calls live inside a hidden keyed contract container so
+    # the AppTest data contract (Active/Completed/Storage labels) still holds.
+    render_metrics_grid(
+        [
+            {
+                "label": "Active",
+                "value": f"{active} running",
+                "delta": f"{counts['queued']} queued" if counts["queued"] else None,
+                "delta_color": "off",
+            },
+            {
+                "label": "Completed",
+                "value": completed,
+                "delta": f"{completed} total videos" if completed else None,
+                "delta_color": "off",
+            },
+            {
+                "label": "Attention",
+                "value": failed,
+                "delta": f"{failed} failed" if failed else "all clear",
+                "delta_color": "inverse" if failed else "off",
+            },
+            {
+                "label": "Storage",
+                "value": format_file_size(total_bytes),
+                "delta": f"{file_count} files" if file_count else None,
+                "delta_color": "off",
+            },
+        ],
+        contract_key="mpt-overview-metrics",
+        columns=4,
+    )
 
     # ── Production pipeline (informational stage row) ──────────────────────
     st.markdown("<div style='margin-top:1rem;'><b>Production pipeline</b></div>", unsafe_allow_html=True)

@@ -115,7 +115,6 @@ def render_nav_shell(active=""):
         if st.button(
             "☰",
             key="nav_hamburger",
-            help="Open navigation",
             use_container_width=False,   # compact icon, not a stretched block
             type="secondary",
         ):

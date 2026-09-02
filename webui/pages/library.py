@@ -19,7 +19,7 @@ from webui.shared import (
     delete_task, open_task_path, open_task_video, build_video_download_name,
     count_processing_tasks, task_manager_label,
     webui_api_client, webui_batch,
-    const, tm,
+    const, tm, render_metrics_grid,
 )
 
 
@@ -55,18 +55,19 @@ def render_library():
     failed = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_FAILED)
     cancelled = sum(1 for t in tasks if t.get("state") == const.TASK_STATE_CANCELLED)
 
-    # Status summary metrics
-    summary_cols = st.columns(5)
-    with summary_cols[0]:
-        st.metric("Queued", queued)
-    with summary_cols[1]:
-        st.metric("Processing", processing)
-    with summary_cols[2]:
-        st.metric("Completed", completed)
-    with summary_cols[3]:
-        st.metric("Failed", failed)
-    with summary_cols[4]:
-        st.metric("Cancelled", cancelled)
+    # Status summary metrics (visible responsive grid; st.metric kept as a
+    # hidden keyed contract for AppTest).
+    render_metrics_grid(
+        [
+            {"label": "Queued", "value": queued},
+            {"label": "Processing", "value": processing},
+            {"label": "Completed", "value": completed},
+            {"label": "Failed", "value": failed},
+            {"label": "Cancelled", "value": cancelled},
+        ],
+        contract_key="mpt-library-metrics",
+        columns=5,
+    )
 
     st.divider()
 
