@@ -140,23 +140,6 @@ def render_nav_shell(active=""):
 
             st.divider()
 
-            # Settings is a first-class, always-visible menu item. It also
-            # appears in the NAV_PAGES loop above; this emphasised button is a
-            # redundant guarantee that Settings can NEVER be hidden.
-            settings_page = next(
-                (p for p in NAV_PAGES if _slug(p) == "render_settings"), None
-            )
-            if settings_page:
-                if st.button(
-                    f"{settings_page.icon or '⚙️'} Settings",
-                    key="nav_settings_explicit",
-                    use_container_width=True,
-                    type="primary" if active == "render_settings" else "secondary",
-                    disabled=active == "render_settings",
-                ):
-                    st.session_state[_SESSION_NAV] = False
-                    st.switch_page(settings_page)
-
             # Explicit close affordance (the hamburger toggle also closes).
             if st.button("✕ Close", key="nav_close", use_container_width=True):
                 st.session_state[_SESSION_NAV] = False

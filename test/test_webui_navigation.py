@@ -362,7 +362,8 @@ def test_hamburger_opens_drawer_with_all_six_items_and_settings():
         "nav_item_render_settings",
     ], items
     assert "nav_item_render_settings" in items, "Settings missing from explicit nav"
-    assert "nav_settings_explicit" in [b.key for b in at.button if b.key]
+    # Settings is explicitly visible as a menu item (the ⚙️ Settings entry in the
+    # NAV_PAGES loop) -- it can never be hidden.
 
 
 @pytest.mark.parametrize("close_via", ["nav_close", "nav_hamburger"])
@@ -418,17 +419,17 @@ def test_drawer_navigates_to_each_target(target, nav_key, start_slug):
     assert _nav_open(at) is False
 
 
-def test_settings_reachable_via_explicit_settings_button():
+def test_settings_reachable_via_drawer():
     """Requirement: Settings MUST be explicitly visible & reachable from the
-    drawer (the redundant Settings button, not only the loop item)."""
+    drawer (the ⚙️ Settings menu item in the NAV_PAGES loop)."""
     at = _load_main()
     at._page_hash = calc_hash("render_discover")
     at.run()
     at.button(key="nav_hamburger").click().run()
-    at.button(key="nav_settings_explicit").click().run()
+    at.button(key="nav_item_render_settings").click().run()
     assert not at.exception, at.exception
     md = [m.value for m in at.markdown if m.value]
-    assert any("### Settings" in v for v in md), "Settings explicit button did not navigate"
+    assert any("### Settings" in v for v in md), "Settings menu item did not navigate"
 
 
 def test_nav_shell_is_single_source_of_truth():
@@ -437,8 +438,8 @@ def test_nav_shell_is_single_source_of_truth():
     # pulls items exclusively from the canonical registry
     assert "from webui.nav_pages import NAV_PAGES" in shell
     assert "for page in NAV_PAGES:" in shell
-    # the redundant Settings button is also derived from NAV_PAGES
-    assert "settings_page = next(" in shell
+    # Settings is a loop item (always visible) -- not a redundant duplicate
+    assert "nav_settings_explicit" not in shell
     # every page module wires in the shell
     for name in ("discover", "explore", "review", "create", "library", "settings"):
         src = _read(WEBUI / "pages" / f"{name}.py")
