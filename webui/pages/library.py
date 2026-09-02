@@ -149,8 +149,17 @@ def _render_task_card(task, status_key):
         status_label = "Queued"
 
     with st.container(key=f"task_card_{status_key}_{task_id}", border=True):
-        col1, col2, col3 = st.columns([3, 1, 2])
-        with col1:
+        # Phase 15G Class R2/R3: meta / status / action columns were
+        # `st.columns([3, 1, 2])` whose 2/6 action column collapsed to ~47px on
+        # 320px and clipped "Open folder" -> "Downloa/d", "Delete" -> "De/le/te".
+        # Actions now live in a dedicated full-width `mpt-card-actions` row
+        # below the metadata (PO-accepted mobile contract: "action buttons below
+        # card metadata, stacked full-width actions"). Meta+status stay
+        # side-by-side `[3,1]`; action buttons flex-wrap (>=140px min) so no label
+        # is ever squeezed. Streamlit 1.59 column emotion classes fight @media,
+        # so a dedicated keyed container + non-media flex-wrap is the robust fix.
+        meta_col, status_col = st.columns([3, 1])
+        with meta_col:
             # Thumbnail (real if the task summary exposes one, else a status tinted placeholder)
             thumbnail = task.get("thumbnail") or ""
             if thumbnail and os.path.isfile(thumbnail):
@@ -167,7 +176,7 @@ def _render_task_card(task, status_key):
             elif task.get("source"):
                 st.caption(f"Source: {task['source']}")
             st.caption(format_task_time(task.get("mtime")))
-        with col2:
+        with status_col:
             st.markdown(f'<span class="{status_class}">{status_label}</span>', unsafe_allow_html=True)
             if state == const.TASK_STATE_PROCESSING:
                 st.progress(progress / 100.0, text=f"{progress}%")
@@ -175,7 +184,7 @@ def _render_task_card(task, status_key):
                 st.progress(1.0, text="100%")
             else:
                 st.caption(f"{progress}%")
-        with col3:
+        with st.container(key=f"card_actions_{status_key}_{task_id}"):
             video_file = task.get("video_file", "")
             has_video = bool(video_file) and os.path.isfile(video_file)
             is_processing = task_state_filter_key(task) == "processing"
