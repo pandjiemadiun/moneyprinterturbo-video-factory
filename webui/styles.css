@@ -89,7 +89,7 @@ div[data-testid="stHorizontalBlock"] {
    blocks, WITHOUT breaking ratio-based form columns (the min-width only
    binds when the row is too narrow to fit). */
 div[data-testid="stColumn"] {
-    min-width: 120px !important;
+    min-width: 140px !important;
     flex-shrink: 1 !important;
     flex-grow: 1 !important;
 }
@@ -136,13 +136,15 @@ button[data-testid="stBaseButton-secondary"]:hover {
     border-color: var(--mpt-primary) !important;
 }
 
-/* ── Hamburger: compact, never a giant white rectangle ──────────────────── */
-#nav_hamburger,
-button[data-testid="stBaseButton-secondary"][kind="header"] {
+/* ── Hamburger: compact, never a giant white rectangle ────────────────────
+   st.button(key="nav_hamburger") wraps the button in a Streamlit element
+   container carrying class .st-key-nav_hamburger. Target that wrapper so the
+   hamburger stays a ~40px icon button on every viewport. */
+.st-key-nav_hamburger button[data-testid="stBaseButton-secondary"] {
     min-width: 36px !important;
     max-width: 44px !important;
-    padding: 0.35rem 0.5rem !important;
-    font-size: 1.15rem !important;
+    padding: 0.3rem 0.5rem !important;
+    font-size: 1.1rem !important;
     line-height: 1 !important;
 }
 
@@ -281,7 +283,10 @@ div[data-testid="stTabs"] [role="tablist"] {
     padding-bottom: 4px !important;
 }
 
-div[data-testid="stTabs"] button[data-testid="stTab"] {
+/* Streamlit 1.59 renders tab buttons as <div data-testid="stTab" role="tab">,
+   NOT <button>. (Using button[...] here matched nothing -> unstyled, clipped
+   tabs on mobile. See Phase 15D defect D.) */
+div[data-testid="stTabs"] div[data-testid="stTab"] {
     border-radius: var(--mpt-radius-sm) var(--mpt-radius-sm) 0 0 !important;
     border: 1px solid transparent !important;
     border-bottom: none !important;
@@ -294,8 +299,8 @@ div[data-testid="stTabs"] button[data-testid="stTab"] {
     flex-shrink: 0 !important;
 }
 
-div[data-testid="stTabs"] button[data-testid="stTab"][aria-selected="true"],
-div[data-testid="stTabs"] button[aria-selected="true"] {
+div[data-testid="stTabs"] div[data-testid="stTab"][aria-selected="true"],
+div[data-testid="stTabs"] div[aria-selected="true"] {
     background: var(--mpt-surface) !important;
     color: var(--mpt-primary) !important;
     border-color: var(--mpt-border) !important;
@@ -309,7 +314,7 @@ div[data-testid="stTabs"] [data-testid="stTabPanel"] {
 
 /* Compact tabs on narrow screens. */
 @media (max-width: 768px) {
-    div[data-testid="stTabs"] button[data-testid="stTab"] {
+    div[data-testid="stTabs"] div[data-testid="stTab"] {
         font-size: 0.8rem !important;
         padding: 0.4rem 0.6rem !important;
     }
