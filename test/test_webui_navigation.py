@@ -234,6 +234,30 @@ def test_overview_is_default_landing():
     assert "Storage" in metric_labels, metric_labels
 
 
+def test_overview_pipeline_is_responsive_no_compressed_columns():
+    """Phase 15F: the production-pipeline stage labels must NEVER fragment on
+    narrow screens. The old 6-column `st.columns()` row squeezed each stage label
+    into a ~30-50px column on 320px and shattered words ("COMPOSI/TION",
+    "CO/MP/LE/TE"). It is replaced by a scrollable stepper (.mpt-pipeline) with
+    white-space:nowrap per step so the row scrolls instead of the words breaking."""
+    src = _read(WEBUI / "pages" / "overview.py")
+    css = _read(WEBUI / "styles.css")
+    # (1) the broken compressed layout is gone.
+    assert "st.columns(len(_PIPELINE_STAGES))" not in src, \
+        "Overview still renders the pipeline as 6 squeezed columns"
+    # (2) the deliberate responsive stepper is in place.
+    assert "mpt-pipeline" in src, "Overview pipeline step missing (.mpt-pipeline)"
+    assert ".mpt-pipeline-step" in css, ".mpt-pipeline-step CSS rule missing"
+    assert "white-space: nowrap" in css, "pipeline steps must use white-space:nowrap"
+    # (3) at runtime the real step labels are still rendered (no data loss).
+    at = _load_main()
+    at.run()
+    assert not at.exception, at.exception
+    md = "".join(m.value for m in at.markdown if m.value)
+    for stage in ("IDEA", "SCRIPT", "MATERIALS", "AUDIO", "COMPOSITION", "COMPLETE"):
+        assert stage in md, f"pipeline stage {stage!r} missing from rendered Overview"
+
+
 def test_review_back_to_discover_navigates_cleanly():
     """Reproduces the previously-broken flow with the Page-object contract."""
     at = _load_main()

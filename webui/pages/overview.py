@@ -17,6 +17,7 @@ empty / disconnected state -- never fabricated figures.
 import streamlit as st
 import sys
 import os
+import html
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
@@ -96,13 +97,28 @@ def render_overview():
         columns=4,
     )
 
-    # ── Production pipeline (informational stage row) ──────────────────────
+    # ── Production pipeline (informational, responsive) ────────────────────
+    # Real mobile-first layout: a horizontally-scrollable stepper so every stage
+    # label stays on one line. The old `st.columns(6)` compressed the stages to
+    # ~30-50px on narrow screens and shattered labels ("COMPOSI/TION",
+    # "CO/MP/LE/TE"). Each step here has a min-width + white-space:nowrap, and the
+    # track scrolls horizontally when 6 steps exceed the viewport (a genuine
+    # horizontal sequence -> allowed per Phase 15F). Streamlit 1.59 ignores @media
+    # in injected <style>, so this is a single non-media flex rule that works at
+    # every width from 320px up to desktop.
     st.markdown("<div style='margin-top:1rem;'><b>Production pipeline</b></div>", unsafe_allow_html=True)
-    cols = st.columns(len(_PIPELINE_STAGES))
-    for col, (stage, icon) in zip(cols, _PIPELINE_STAGES):
-        with col:
-            st.markdown(f"<div style='text-align:center; font-size:1.6rem'>{icon}</div>", unsafe_allow_html=True)
-            st.caption(stage)
+    track_html = ""
+    for stage, icon in _PIPELINE_STAGES:
+        track_html += (
+            f'<div class="mpt-pipeline-step">'
+            f'<span class="mpt-pipeline-icon" aria-hidden="true">{html.escape(icon)}</span>'
+            f'<span class="mpt-pipeline-label">{html.escape(stage)}</span>'
+            f'</div>'
+        )
+    st.markdown(
+        f'<div class="mpt-pipeline"><div class="mpt-pipeline-track">{track_html}</div></div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         f"Active: {active}  ·  Completed: {completed}  ·  Failed: {failed}  ·  "
         f"Total tasks: {total} ·  Storage: {format_file_size(total_bytes)}"
