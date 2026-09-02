@@ -273,7 +273,7 @@ def _render_opportunity_card(item, index, item_type):
     feasibility = item.get("visual_feasibility", "")
     sources = item.get("sources", [])
 
-    with st.container(border=True):
+    with st.container(border=True, key=f"opportunity_card_{item_type}_{index}"):
         col1, col2 = st.columns([3, 1])
         with col1:
             st.markdown(f"**{topic}**")
