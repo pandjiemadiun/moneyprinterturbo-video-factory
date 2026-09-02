@@ -322,6 +322,37 @@ def test_library_card_actions_not_width_starved(monkeypatch):
     assert any("Delete" in lbl for lbl in labels), f"'Delete' label missing: {labels}"
 
 
+def test_discover_filters_responsive_no_starved_selectboxes():
+    """Phase 15H Class R1-form-controls: the Discover Filters row
+    (Geography/Language/Category) must never `st.columns(3)` on mobile -- that
+    starved each selectbox to ~46-68px (unreadable labels). Filters now use a
+    `.mpt-filter-row` flex-wrap container (min 200px each, 1-per-row on mobile)."""
+    src = _read(WEBUI / "pages" / "discover.py")
+    css = _read(WEBUI / "styles.css")
+    # (1) no st.columns(3) call remains anywhere in discover.py (AST; ignores
+    # comments and the legitimate [3,2,2]/[3,1]/[2] column usages for cards/text)
+    cols3 = [n for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "columns"
+             and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
+             and n.func.value.id == "st" and n.args
+             and isinstance(n.args[0], ast.Constant) and n.args[0].value == 3]
+    assert not cols3, "discover.py still calls st.columns(3) (selectbox width-starvation risk)"
+    # (2) the deliberate responsive contract is present
+    assert "discover_filters" in src, ".mpt-filter-row container missing in Discover"
+    assert "st-key-discover_filters" in css, ".mpt-filter-row CSS rule missing"
+    assert "flex-wrap: wrap" in css, "filter-row must flex-wrap"
+    # (3) runtime: the three filter selectboxes still render (no data loss;
+    # Discover's initial render is network-free -- uses static recommended data)
+    at = _load_main()
+    at._page_hash = calc_hash("render_discover")
+    at.run()
+    assert not at.exception, at.exception
+    keys = [s.key for s in at.selectbox]
+    for k in ("discover_geo", "discover_language", "discover_category"):
+        assert k in keys, f"filter selectbox {k!r} missing: {keys}"
+
+
+
 def test_review_back_to_discover_navigates_cleanly():
     """Reproduces the previously-broken flow with the Page-object contract."""
     at = _load_main()

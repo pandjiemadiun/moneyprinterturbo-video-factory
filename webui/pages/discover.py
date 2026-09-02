@@ -134,9 +134,14 @@ def render_discover():
     )
 
     # ── Filters (secondary, collapsible — never dominate the screen) ────────
+    # Layout contract: `.mpt-filter-row`. The old `st.columns(3)` starved each
+    # selectbox to ~46-68px on 320px (unreadable "Geography"/"Language"/"Category"
+    # labels) — the same R1 width-starvation class as the Quick Actions. Filters
+    # now live in a flex-wrap container: 3-across on wide screens, one-per-row
+    # (>=200px, full-width) on mobile. No `@media` (inert in Streamlit 1.59
+    # injected <style>); flex-wrap handles the reflow.
     with st.expander(tr("Filters"), expanded=False):
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        with st.container(key="discover_filters"):
             default_geo = _saved_ui_choice("discover_geo", _GEOGRAPHIES, "ID")
             geo = st.selectbox(
                 tr("Geography"), options=_GEOGRAPHIES,
@@ -144,7 +149,6 @@ def render_discover():
                 key="discover_geo",
             )
             _set_runtime_config("ui", "discover_geo", geo)
-        with col2:
             default_language = _saved_ui_choice("discover_language", _LANGUAGES, "id")
             language = st.selectbox(
                 tr("Language"), options=_LANGUAGES,
@@ -152,7 +156,6 @@ def render_discover():
                 key="discover_language",
             )
             _set_runtime_config("ui", "discover_language", language)
-        with col3:
             default_category = _saved_ui_choice("discover_category", _CATEGORIES, "general")
             category = st.selectbox(
                 tr("Category"), options=_CATEGORIES,
