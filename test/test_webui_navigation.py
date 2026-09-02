@@ -258,6 +258,70 @@ def test_overview_pipeline_is_responsive_no_compressed_columns():
         assert stage in md, f"pipeline stage {stage!r} missing from rendered Overview"
 
 
+def test_overview_quick_actions_responsive_no_compressed_columns():
+    """Phase 15G Class R1: Overview Quick Actions must never compress button
+    labels on mobile. The old `st.columns(3)` starved each button to ~90px and
+    shattered 'Open Library' -> 'Open/Librar/y'. Replaced by a .mpt-action-row
+    flex-wrap row (min 160px per button) so the row wraps instead of words
+    breaking. This guardrail forbids the dangerous pattern from returning."""
+    src = _read(WEBUI / "pages" / "overview.py")
+    css = _read(WEBUI / "styles.css")
+    # (1) no st.columns() call remains in Overview (AST check -- ignores comments)
+    cols_calls = [n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "columns"
+                  and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
+                  and n.func.value.id == "st"]
+    assert not cols_calls, f"Overview must not call st.columns (width-starvation risk): {len(cols_calls)}"
+    # (2) the deliberate responsive contract is present
+    assert "quick_actions_row" in src, ".mpt-action-row container missing in Overview"
+    assert "st-key-quick_actions_row" in css, ".mpt-action-row CSS rule missing"
+    assert "flex-wrap: wrap" in css, "action-row must flex-wrap (no squeezing)"
+    # runtime: the three labelled actions still render (no data loss / dead buttons)
+    at = _load_main()
+    at.run()
+    assert not at.exception, at.exception
+    labels = [b.label for b in at.button]
+    for action in ("🔍 Discover Ideas", "🎬 Create Video", "📚 Open Library"):
+        assert any(action in lbl for lbl in labels), f"quick action {action!r} missing: {labels}"
+
+
+def test_library_card_actions_not_width_starved(monkeypatch):
+    """Phase 15G Class R2/R3: Library card action buttons must not be squeezed
+    into a 2/6 column (~47px at 320px) -- that clipped 'Open folder' ->
+    'Downloa/d'. Actions now live in a dedicated .mpt-card-actions full-width
+    row below the metadata (PO-accepted mobile contract)."""
+    from webui.pages import library as library_mod
+    import app.models.const as const
+    src = _read(WEBUI / "pages" / "library.py")
+    css = _read(WEBUI / "styles.css")
+    # (1) the width-starving [3,1,2] action-column layout is gone (AST check --
+    # ignores comments; st.columns(3) for the cache *metrics* is allowed).
+    bad_card_cols = []
+    for n in ast.walk(ast.parse(src)):
+        if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "columns" \
+           and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) \
+           and n.func.value.id == "st" and n.args:
+            arg = n.args[0]
+            if isinstance(arg, ast.List) and [e.value for e in arg.elts] == [3, 1, 2]:
+                bad_card_cols.append("st.columns([3,1,2])")
+    assert not bad_card_cols, "Library card still uses width-starving st.columns([3,1,2])"
+    # (2) the dedicated card-actions contract is present
+    assert "card_actions_" in src, "dedicated card_actions container missing in Library"
+    assert "st-key-card_actions" in css, ".mpt-card-actions CSS rule missing"
+    # runtime: a Complete task renders full, untruncated action labels
+    monkeypatch.setattr(library_mod, "collect_task_summaries", lambda limit=20: [{
+        "task_id": "t-9", "subject": "Demo", "state": const.TASK_STATE_COMPLETE,
+        "progress": 100, "video_file": "/no/such/v-9.mp4", "mtime": 1700000000.0,
+    }])
+    at = _load_main()
+    at._page_hash = calc_hash("render_library")
+    at.run()
+    assert not at.exception, at.exception
+    labels = [b.label for b in at.button]
+    assert any("Open folder" in lbl for lbl in labels), f"'Open folder' label missing/truncated: {labels}"
+    assert any("Delete" in lbl for lbl in labels), f"'Delete' label missing: {labels}"
+
+
 def test_review_back_to_discover_navigates_cleanly():
     """Reproduces the previously-broken flow with the Page-object contract."""
     at = _load_main()
