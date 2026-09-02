@@ -20,6 +20,7 @@ Prefill contract (preserved):
 import streamlit as st
 import sys
 import os
+import html
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
@@ -286,20 +287,24 @@ def _render_opportunity_card(item, index, item_type):
             elif score:
                 st.caption(f"Score: {score:.2f}")
 
-        # Production-gate row: feasibility + providers + freshness + format
-        meta_cols = st.columns(4)
-        with meta_cols[0]:
-            if feasibility:
-                st.caption(f"🎥 Feasibility: {feasibility}")
-        with meta_cols[1]:
-            if providers:
-                st.caption(f"📡 {'+'.join(providers)}")
-        with meta_cols[2]:
-            if freshness:
-                st.caption(f"🕐 {freshness} min" if freshness > 1 else "🕐 now")
-        with meta_cols[3]:
-            if format_type:
-                st.caption(f"📐 {format_type}")
+        # Production-gate metadata as wrapping chips. A 4-column caption row
+        # collapses to ~70px columns on mobile and breaks words mid-token
+        # ("Feasibility" / "Explainer"). Chips wrap naturally with whole-word
+        # breaks only, stay compact, and remain readable on every viewport.
+        chips = []
+        if feasibility:
+            chips.append(f"🎥 {feasibility}")
+        if providers:
+            chips.append(f"📡 {'+'.join(providers)}")
+        if freshness:
+            chips.append(f"🕐 {f'{freshness} min' if freshness > 1 else 'now'}")
+        if format_type:
+            chips.append(f"📐 {format_type}")
+        if chips:
+            chip_html = "".join(
+                f"<span class='mpt-chip'>{html.escape(c)}</span>" for c in chips
+            )
+            st.markdown(f"<div class='mpt-chip-row'>{chip_html}</div>", unsafe_allow_html=True)
 
         # Provider health / provenance
         if sources:

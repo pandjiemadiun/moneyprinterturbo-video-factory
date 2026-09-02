@@ -183,46 +183,42 @@ def _render_task_card(task, status_key):
             is_busy = is_processing or tm.is_task_busy(task)
 
             if state == const.TASK_STATE_QUEUED:
-                if st.button("✕", key=f"task_cancel_{status_key}_{task_id}", help="Cancel", type="primary"):
+                if st.button("✕ Cancel", key=f"task_cancel_{status_key}_{task_id}",
+                             help="Cancel", type="secondary", use_container_width=True):
                     _do_job_action(task_id, "cancel")
                     st.rerun()
             elif state == const.TASK_STATE_PROCESSING:
-                st.caption("Processing...")
-            elif state == const.TASK_STATE_FAILED:
-                if st.button("↻", key=f"task_retry_{status_key}_{task_id}", help="Retry"):
+                st.caption("Processing…")
+            elif state in (const.TASK_STATE_FAILED, const.TASK_STATE_CANCELLED):
+                # Failed / Cancelled jobs: retry or delete. Destructive actions
+                # are secondary (never the primary gradient) so they never read
+                # as the page's main call-to-action. Full-width + 44px touch
+                # target so every action is labelled and tappable on mobile.
+                if st.button("↻ Retry", key=f"task_retry_{status_key}_{task_id}",
+                             help="Retry", type="secondary", use_container_width=True):
                     _do_job_action(task_id, "retry")
                     st.rerun()
-                if st.button("✕", key=f"task_delete_{status_key}_{task_id}", help="Delete", type="primary"):
-                    _do_job_action(task_id, "delete")
-                    st.rerun()
-            elif state == const.TASK_STATE_CANCELLED:
-                if st.button("↻", key=f"task_retry_{status_key}_{task_id}", help="Retry"):
-                    _do_job_action(task_id, "retry")
-                    st.rerun()
-                if st.button("✕", key=f"task_delete_{status_key}_{task_id}", help="Delete", type="primary"):
+                if st.button("✕ Delete", key=f"task_delete_{status_key}_{task_id}",
+                             help="Delete", type="secondary", use_container_width=True):
                     _do_job_action(task_id, "delete")
                     st.rerun()
             elif state == const.TASK_STATE_COMPLETE:
-                acols = st.columns(4)
-                with acols[0]:
-                    if has_video:
-                        with st.popover("▶", key=f"task_play_{status_key}_{task_id}", help="Play"):
-                            st.video(video_file)
-                    else:
-                        st.empty()
-                with acols[1]:
-                    if st.button("📂", key=f"task_open_{status_key}_{task_id}", help="Open folder"):
-                        open_task_path(task_id)
-                with acols[2]:
-                    if has_video:
-                        filename = os.path.basename(video_file)
-                        st.link_button("↓", url=f"/api/v1/download/{task_id}/{filename}", key=f"task_download_{status_key}_{task_id}", help="Download")
-                    else:
-                        st.empty()
-                with acols[3]:
-                    if st.button("✕", key=f"task_delete_{status_key}_{task_id}", help="Delete", type="primary"):
-                        _do_job_action(task_id, "delete")
-                        st.rerun()
+                if has_video:
+                    with st.popover("▶ Play", key=f"task_play_{status_key}_{task_id}",
+                                    help="Play", use_container_width=True):
+                        st.video(video_file)
+                if st.button("📂 Open folder", key=f"task_open_{status_key}_{task_id}",
+                             help="Open folder", type="secondary", use_container_width=True):
+                    open_task_path(task_id)
+                if has_video:
+                    filename = os.path.basename(video_file)
+                    st.link_button("↓ Download", url=f"/api/v1/download/{task_id}/{filename}",
+                                   key=f"task_download_{status_key}_{task_id}",
+                                   help="Download", use_container_width=True)
+                if st.button("✕ Delete", key=f"task_delete_{status_key}_{task_id}",
+                             help="Delete", type="secondary", use_container_width=True):
+                    _do_job_action(task_id, "delete")
+                    st.rerun()
 
         if task.get("failed_stage"):
             st.caption(f"Failed at: {task['failed_stage']}")

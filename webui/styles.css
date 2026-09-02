@@ -178,11 +178,23 @@ button[data-testid="stBaseButton-secondary"]:hover {
    container carrying class .st-key-nav_hamburger. Target that wrapper so the
    hamburger stays a ~40px icon button on every viewport. */
 .st-key-nav_hamburger button[data-testid="stBaseButton-secondary"] {
-    min-width: 36px !important;
+    min-width: 44px !important;
     max-width: 44px !important;
-    padding: 0.3rem 0.5rem !important;
-    font-size: 1.1rem !important;
+    width: 44px !important;       /* stable 44px square touch target */
+    min-height: 44px !important;
+    height: 44px !important;
+    padding: 0.5rem !important;
+    font-size: 1.2rem !important;
     line-height: 1 !important;
+}
+
+/* Library task-card action buttons: labelled + 44px minimum touch target so
+   they are never tiny icon-only hit targets on mobile (Phase 15E). */
+div[class*="st-key-task_card"] button[data-testid="stBaseButton-secondary"],
+div[class*="st-key-task_card"] div[data-testid="stLinkButton"] > a {
+    min-height: 44px !important;
+    padding: 0.55rem 0.75rem !important;
+    font-size: 0.9rem !important;
 }
 
 /* App shell header bar (compact SaaS chrome). */
@@ -280,7 +292,16 @@ div[data-testid="stContainer"] div[data-testid="stMetric"] {
 .mpt-chip.processing { color: var(--mpt-processing); }
 .mpt-chip.failed     { color: var(--mpt-failed); }
 .mpt-chip.queued     { color: var(--mpt-queued); }
-.mpt-chip.cancelled  { color: var(--mpt-cancelled); }
+.mpt-chip.cancelled { color: var(--mpt-cancelled); }
+
+/* Wrapping chip row for compact metadata (Discovery production gate). */
+.mpt-chip-row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: var(--mpt-space-1) !important;
+    margin-top: var(--mpt-space-2) !important;
+}
 
 /* Backwards-compat aliases (existing pages + 15B CSS). */
 .status-complete    { color: var(--mpt-complete) !important; font-weight: 600 !important; }
