@@ -102,14 +102,22 @@ def render_nav_shell(active=""):
 
     st.session_state.setdefault(_SESSION_NAV, False)
 
-    # ── Header: hamburger + current-page title ───────────────────────────────
+    # ── Header: compact top nav bar ─────────────────────────────────────────
+    # Single-line SaaS chrome: compact hamburger + the page headline.
+    # The headline (### {title}) is the *only* headline on the page -- each
+    # page body renders a muted subtitle, never a competing H1 -- so the shell
+    # and page no longer duplicate each other (Phase 15D defect B).
+    # The hamburger is a compact icon button (use_container_width=False so it
+    # never stretches into a giant white rectangle -- Phase 15D defect C);
+    # compact dark styling is applied via data-testid in styles.css.
     btn_col, title_col = st.columns([1, 14], vertical_alignment="center")
     with btn_col:
         if st.button(
             "☰",
             key="nav_hamburger",
             help="Open navigation",
-            use_container_width=True,
+            use_container_width=False,   # compact icon, not a stretched block
+            type="secondary",
         ):
             st.session_state[_SESSION_NAV] = not st.session_state.get(_SESSION_NAV, False)
     with title_col:

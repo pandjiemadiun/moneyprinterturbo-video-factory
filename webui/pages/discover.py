@@ -125,9 +125,9 @@ _CATEGORIES = ["general", "technology", "business", "sports", "entertainment", "
 def render_discover():
     """Render the Discover page (primary landing — 'What should I make?')."""
     render_nav_shell(active="render_discover")
+    # Headline (### Discover) is owned by the app shell (nav_shell).
     st.markdown(
-        "<h1 style='margin-bottom: 0.25rem;'>Discover</h1>"
-        "<p style='color: #64748b; margin-top: 0; margin-bottom: 1rem;'>"
+        "<p class='mpt-page-sub' style='margin-bottom:1rem;'>"
         "Trending topics that are visually producible with your footage providers.</p>",
         unsafe_allow_html=True,
     )

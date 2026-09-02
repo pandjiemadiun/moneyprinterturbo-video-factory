@@ -1,3 +1,49 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   MoneyPrinterTurbo — Canonical WebUI Visual System (Phase 15D)
+   A coherent, reusable, DARK SaaS visual system for the existing Streamlit app.
+
+   Design tokens are the single source of truth. Re-usable primitives
+   (MetricCard, StatusChip, SectionCard, PageHeader, ResponsiveGrid,
+   PrimaryAction/SecondaryAction, FormSection) are expressed through these
+   tokens + Streamlit data-testid overrides. No per-page CSS duplication.
+
+   Mobile-first: desktop layouts gain density via the same primitives.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* ── Design tokens (single source of truth) ─────────────────────────────── */
+:root {
+    --mpt-space-1: 0.25rem;   /* 4px  */
+    --mpt-space-2: 0.5rem;    /* 8px  */
+    --mpt-space-3: 0.75rem;   /* 12px */
+    --mpt-space-4: 1rem;      /* 16px */
+    --mpt-space-5: 1.5rem;    /* 24px */
+    --mpt-space-6: 2rem;      /* 32px */
+
+    --mpt-radius: 10px;
+    --mpt-radius-sm: 6px;
+
+    --mpt-bg:            #0f0f14;
+    --mpt-surface:       #16161e;
+    --mpt-surface-2:     #1a1a24;
+    --mpt-surface-3:     #1f2027;
+    --mpt-border:        #2a2a3a;
+    --mpt-border-strong: #334159;
+
+    --mpt-text:          #e0e0e0;
+    --mpt-text-muted:    #94a3b8;
+    --mpt-text-dim:      #64748b;
+
+    --mpt-primary:       #6366f1;
+    --mpt-primary-2:     #8b5cf6;
+    --mpt-accent:        #a78bfa;
+
+    --mpt-complete:      #34d399;
+    --mpt-processing:    #fbbf24;
+    --mpt-failed:        #f87171;
+    --mpt-queued:        #94a3b8;
+    --mpt-cancelled:     #94a3b8;
+}
+
 /* ── Global resets ───────────────────────────────────────────────────────── */
 header[data-testid="stHeader"],
 div[data-testid="stToolbar"],
@@ -8,189 +54,365 @@ div[data-testid="stSkillsNudge"] {
     display: none !important;
 }
 
+/* Main content area: remove Streamlit's default padding bloat. */
 div[data-testid="stMainBlockContainer"] {
-    padding-top: 0.25rem !important;
+    padding-top: var(--mpt-space-3) !important;
+    padding-bottom: var(--mpt-space-4) !important;
     max-width: 100% !important;
 }
 
-h1 {
+/* H1 default margin reset (page headline is owned by the app shell). */
+h1, h2, h3, h4, h5, h6 {
     padding-top: 0 !important;
     margin-top: 0 !important;
 }
 
-/* ── Theme ───────────────────────────────────────────────────────────────── */
+/* ── Theme / foundation ──────────────────────────────────────────────────── */
 .stApp {
-    background: #0f0f14 !important;
-    color: #e0e0e0 !important;
+    background: var(--mpt-bg) !important;
+    color: var(--mpt-text) !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 0.95rem !important;
+    line-height: 1.5 !important;
 }
 
-/* ── Layout ──────────────────────────────────────────────────────────────── */
-[data-testid="stHorizontalBlock"] {
+/* ── Layout: wrap column rows so metrics/cards flow to 2-per-row on narrow viewports */
+div[data-testid="stHorizontalBlock"] {
     flex-wrap: wrap !important;
+    gap: var(--mpt-space-2) !important;
+    align-items: flex-start !important;
 }
 
-/* ── Buttons ─────────────────────────────────────────────────────────────── */
+/* Responsive grid contract: every Streamlit column keeps a sane minimum width
+   so a 4-column metric row becomes 2-per-row on mobile instead of 4 tiny
+   blocks, WITHOUT breaking ratio-based form columns (the min-width only
+   binds when the row is too narrow to fit). */
+div[data-testid="stColumn"] {
+    min-width: 120px !important;
+    flex-shrink: 1 !important;
+    flex-grow: 1 !important;
+}
+
+/* ── Primary actions (gradient, prominent) ───────────────────────────────── */
 button[data-testid="stBaseButton-primary"] {
-    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+    background: linear-gradient(135deg, var(--mpt-primary) 0%, var(--mpt-primary-2) 100%) !important;
     border: none !important;
-    border-radius: 8px !important;
+    border-radius: var(--mpt-radius-sm) !important;
     font-weight: 600 !important;
-    min-height: 2.75rem !important;
-    transition: all 0.2s ease !important;
+    min-height: 38px !important;
+    min-width: 32px !important;
+    padding: 0.5rem 1rem !important;
+    transition: all 0.18s ease !important;
+    flex-shrink: 0 !important;
 }
 
 button[data-testid="stBaseButton-primary"]:hover {
     transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4) !important;
+    box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4) !important;
 }
 
+/* Destructive actions must NOT look primary. St.Button has no "danger" type in
+   this build, so destructive actions are rendered as secondary with an accent
+   (red) tint via a dedicated class on the label where used. */
+
+/* ── Secondary actions (compact, dark, tappable) ────────────────────────────
+   Includes the hamburger, drawer items, inline link-style buttons. */
 button[data-testid="stBaseButton-secondary"] {
-    border-radius: 8px !important;
-    min-height: 2.75rem !important;
-}
-
-/* ── Cards & containers ──────────────────────────────────────────────────── */
-div[data-testid="element-container"] {
-    border-radius: 8px !important;
-}
-
-/* ── Inputs ──────────────────────────────────────────────────────────────── */
-input[type="text"],
-input[type="number"],
-textarea,
-div[data-testid="stSelectbox"] > div,
-div[data-testid="stTextInput"] > div > div > input {
-    border-radius: 6px !important;
-    border: 1px solid #2a2a3a !important;
-    background: #1a1a24 !important;
-}
-
-/* ── Tabs ────────────────────────────────────────────────────────────────── */
-div[data-testid="stTabs"] button {
-    border-radius: 6px 6px 0 0 !important;
+    background: var(--mpt-surface-2) !important;
+    border: 1px solid var(--mpt-border-strong) !important;
+    color: var(--mpt-text) !important;
+    border-radius: var(--mpt-radius-sm) !important;
     font-weight: 500 !important;
-    padding: 0.5rem 1rem !important;
+    min-height: 34px !important;
+    min-width: 32px !important;
+    padding: 0.4rem 0.75rem !important;
+    transition: all 0.18s ease !important;
+    flex-shrink: 0 !important;
 }
 
-div[data-testid="stTabs"] button[aria-selected="true"] {
-    background: #1e1e2e !important;
-    color: #a78bfa !important;
-    border-bottom: 2px solid #8b5cf6 !important;
+button[data-testid="stBaseButton-secondary"]:hover {
+    background: var(--mpt-surface-3) !important;
+    border-color: var(--mpt-primary) !important;
 }
 
-/* ── Segmented control ───────────────────────────────────────────────────── */
-div[data-testid="stSegmentControl"] button,
-div[data-testid="stSegmentedControl"] button {
-    border-radius: 6px !important;
+/* ── Hamburger: compact, never a giant white rectangle ──────────────────── */
+#nav_hamburger,
+button[data-testid="stBaseButton-secondary"][kind="header"] {
+    min-width: 36px !important;
+    max-width: 44px !important;
+    padding: 0.35rem 0.5rem !important;
+    font-size: 1.15rem !important;
+    line-height: 1 !important;
 }
 
-/* ── Progress bar ────────────────────────────────────────────────────────── */
-div[data-testid="stProgressBar"] > div > div {
-    background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%) !important;
-    border-radius: 4px !important;
+/* App shell header bar (compact SaaS chrome). */
+.mpt-shell-bar {
+    display: flex !important;
+    align-items: center !important;
+    gap: var(--mpt-space-2) !important;
+    min-height: 40px !important;
 }
 
-/* ── Table ───────────────────────────────────────────────────────────────── */
-div[data-testid="stTable"] table {
-    border-collapse: separate !important;
-    border-spacing: 0 !important;
-    border-radius: 8px !important;
-    overflow: hidden !important;
+.mpt-shell-headline {
+    font-size: 1.15rem !important;
+    font-weight: 700 !important;
+    color: var(--mpt-text) !important;
+    margin: 0 !important;
 }
 
-div[data-testid="stTable"] th {
-    background: #1e1e2e !important;
-    color: #a0a0b0 !important;
-    font-weight: 600 !important;
-    padding: 0.75rem 1rem !important;
-    border-bottom: 1px solid #2a2a3a !important;
+.mpt-shell-context {
+    color: var(--mpt-text-muted) !important;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
 }
 
-div[data-testid="stTable"] td {
-    padding: 0.75rem 1rem !important;
-    border-bottom: 1px solid #1a1a24 !important;
+/* ── Reusable primitive: PageHeader ──────────────────────────────────────── */
+.mpt-page-header {
+    margin-bottom: var(--mpt-space-4) !important;
 }
-
-/* ── Alerts ──────────────────────────────────────────────────────────────── */
-div[data-testid="stAlert"] {
-    border-radius: 8px !important;
-    border-left: 3px solid #6366f1 !important;
+.mpt-page-header .mpt-title {
+    font-size: 1.25rem !important;
+    font-weight: 700 !important;
+    color: var(--mpt-text) !important;
+    margin: 0 0 var(--mpt-space-1) !important;
 }
-
-/* ── Selectbox ───────────────────────────────────────────────────────────── */
-div[data-baseweb="select"] > div {
-    border-radius: 6px !important;
-    border: 1px solid #2a2a3a !important;
-    background: #1a1a24 !important;
-}
-
-/* ── Number input ────────────────────────────────────────────────────────── */
-input[type="number"] {
-    border-radius: 6px !important;
-}
-
-/* ── Checkbox ────────────────────────────────────────────────────────────── */
-label[data-testid="stCheckbox"] span {
+.mpt-page-header .mpt-sub {
+    color: var(--mpt-text-muted) !important;
+    margin: 0 !important;
     font-size: 0.9rem !important;
 }
 
-/* ── Brand ───────────────────────────────────────────────────────────────── */
+/* Standalone page subtitle (headline is owned by the app shell). */
+.mpt-page-sub {
+    color: var(--mpt-text-muted) !important;
+    font-size: 0.9rem !important;
+    line-height: 1.5 !important;
+    margin: 0 !important;
+}
+
+/* ── Reusable primitive: MetricCard (wraps st.metric) ────────────────────── */
+div[data-testid="stMetric"] {
+    background: var(--mpt-surface-2) !important;
+    border: 1px solid var(--mpt-border) !important;
+    border-radius: var(--mpt-radius) !important;
+    padding: 0.7rem 0.85rem !important;
+}
+div[data-testid="stMetric"] label,
+div[data-testid="stMetric"] div[style*="color"] {
+    color: var(--mpt-text-muted) !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"],
+div[data-testid="stMetric"] b {
+    color: var(--mpt-text) !important;
+    font-weight: 700 !important;
+}
+
+/* ── Reusable primitive: StatusChip ──────────────────────────────────────── */
+.mpt-chip {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: var(--mpt-space-1) !important;
+    padding: 0.12rem 0.55rem !important;
+    border-radius: 999px !important;
+    font-size: 0.78rem !important;
+    font-weight: 600 !important;
+    white-space: nowrap !important;
+}
+.mpt-chip.complete   { color: var(--mpt-complete); }
+.mpt-chip.processing { color: var(--mpt-processing); }
+.mpt-chip.failed     { color: var(--mpt-failed); }
+.mpt-chip.queued     { color: var(--mpt-queued); }
+.mpt-chip.cancelled  { color: var(--mpt-cancelled); }
+
+/* Backwards-compat aliases (existing pages + 15B CSS). */
+.status-complete    { color: var(--mpt-complete) !important; font-weight: 600 !important; }
+.status-processing  { color: var(--mpt-processing) !important; font-weight: 600 !important; }
+.status-failed      { color: var(--mpt-failed) !important; font-weight: 600 !important; }
+.status-queued      { color: var(--mpt-queued) !important; font-weight: 600 !important; }
+.status-cancelled   { color: var(--mpt-cancelled) !important; font-weight: 600 !important; }
+
+/* ── Reusable primitive: SectionCard / FormSection ───────────────────────── */
+.mpt-section {
+    background: var(--mpt-surface) !important;
+    border: 1px solid var(--mpt-border) !important;
+    border-radius: var(--mpt-radius) !important;
+    padding: var(--mpt-space-3) !important;
+    margin-bottom: var(--mpt-space-3) !important;
+}
+.mpt-section .mpt-section-title {
+    font-size: 0.9rem !important;
+    font-weight: 600 !important;
+    color: var(--mpt-text-muted) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin: 0 0 var(--mpt-space-2) !important;
+}
+
+/* Streamlit bordered containers inherit the section look. */
+div[data-testid="stContainer"][style*="border"] {
+    background: var(--mpt-surface) !important;
+    border: 1px solid var(--mpt-border) !important;
+    border-radius: var(--mpt-radius) !important;
+}
+
+/* ── Reusable primitive: ResponsiveGrid (HTML/CSS grid for card layouts) ─── */
+.mpt-grid {
+    display: grid !important;
+    gap: var(--mpt-space-3) !important;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
+}
+@media (min-width: 900px) {
+    .mpt-grid-4 { grid-template-columns: repeat(4, 1fr) !important; }
+    .mpt-grid-3 { grid-template-columns: repeat(3, 1fr) !important; }
+    .mpt-grid-2 { grid-template-columns: repeat(2, 1fr) !important; }
+}
+
+/* ── Tabs: compact, dark, mobile-scrollable (no clipped tabs) ─────────────── */
+div[data-testid="stTabs"] {
+    background: transparent !important;
+}
+
+/* The tab button row. Streamlit wraps it in an inner flex div. */
+div[data-testid="stTabs"] > div > div,
+div[data-testid="stTabs"] [role="tablist"] {
+    overflow-x: auto !important;     /* visible scrollbar = affordance */
+    overflow-y: hidden !important;
+    padding-bottom: 4px !important;
+}
+
+div[data-testid="stTabs"] button[data-testid="stTab"] {
+    border-radius: var(--mpt-radius-sm) var(--mpt-radius-sm) 0 0 !important;
+    border: 1px solid transparent !important;
+    border-bottom: none !important;
+    font-weight: 500 !important;
+    color: var(--mpt-text-muted) !important;
+    background: var(--mpt-surface-2) !important;
+    padding: 0.5rem 0.9rem !important;
+    margin-right: var(--mpt-space-1) !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+}
+
+div[data-testid="stTabs"] button[data-testid="stTab"][aria-selected="true"],
+div[data-testid="stTabs"] button[aria-selected="true"] {
+    background: var(--mpt-surface) !important;
+    color: var(--mpt-primary) !important;
+    border-color: var(--mpt-border) !important;
+    border-bottom: 2px solid var(--mpt-primary) !important;
+}
+
+/* Tab content pane. */
+div[data-testid="stTabs"] [data-testid="stTabPanel"] {
+    padding-top: var(--mpt-space-2) !important;
+}
+
+/* Compact tabs on narrow screens. */
+@media (max-width: 768px) {
+    div[data-testid="stTabs"] button[data-testid="stTab"] {
+        font-size: 0.8rem !important;
+        padding: 0.4rem 0.6rem !important;
+    }
+}
+
+/* ── Inputs: compact, dark, no bright white blocks ────────────────────────── */
+div[data-testid="stSelectbox"] > div,
+div[data-testid="stTextInput"] > div > div > input,
+div[data-testid="stTextArea"] > div > div > textarea,
+input[type="text"],
+input[type="number"],
+textarea,
+select {
+    background: var(--mpt-surface-2) !important;
+    border: 1px solid var(--mpt-border) !important;
+    border-radius: var(--mpt-radius-sm) !important;
+    color: var(--mpt-text) !important;
+    padding: 0.4rem 0.6rem !important;
+}
+
+/* Baseweb (selectbox, multiselect, combobox) — neutral dark. */
+div[data-baseweb="select"] > div,
+div[data-baseweb="popover"] > div {
+    border-radius: var(--mpt-radius-sm) !important;
+    border: 1px solid var(--mpt-border) !important;
+    background: var(--mpt-surface-2) !important;
+}
+div[data-baseweb="select"] svg,
+div[data-baseweb="select"] [data-testid="stArrow"] {
+    color: var(--mpt-text-muted) !important;
+}
+
+/* Remove default blue focus ring; use brand focus. */
+div[data-testid="stSelectbox"] div:focus-within,
+div[data-testid="stTextInput"] div:focus-within,
+div[data-baseweb="select"] div:focus-within {
+    border-color: var(--mpt-primary) !important;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25) !important;
+}
+
+/* Checkbox / radio. */
+label[data-testid="stCheckbox"] span { font-size: 0.9rem !important; color: var(--mpt-text); }
+
+/* ── Progress bar ──────────────────────────────────────────────────────────── */
+div[data-testid="stProgressBar"] > div > div {
+    background: linear-gradient(90deg, var(--mpt-primary) 0%, var(--mpt-primary-2) 100%) !important;
+    border-radius: 4px !important;
+}
+
+/* ── Table ────────────────────────────────────────────────────────────────── */
+div[data-testid="stTable"] table {
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    border-radius: var(--mpt-radius) !important;
+    overflow: hidden !important;
+}
+div[data-testid="stTable"] th {
+    background: var(--mpt-surface-2) !important;
+    color: var(--mpt-text-muted) !important;
+    font-weight: 600 !important;
+    padding: 0.5rem 0.75rem !important;
+    border-bottom: 1px solid var(--mpt-border) !important;
+}
+div[data-testid="stTable"] td {
+    padding: 0.5rem 0.75rem !important;
+    border-bottom: 1px solid var(--mpt-surface-3) !important;
+}
+
+/* ── Alerts ────────────────────────────────────────────────────────────────── */
+div[data-testid="stAlert"] {
+    border-radius: var(--mpt-radius-sm) !important;
+    border-left: 3px solid var(--mpt-primary) !important;
+}
+
+/* ── Expander ──────────────────────────────────────────────────────────────── */
+div[data-testid="stExpander"] summary {
+    color: var(--mpt-text) !important;
+    font-weight: 600 !important;
+}
+div[data-testid="stExpander"] {
+    border: 1px solid var(--mpt-border) !important;
+    border-radius: var(--mpt-radius) !important;
+}
+
+/* ── Brand ────────────────────────────────────────────────────────────────── */
 .mpt-brand {
     font-size: 1.5rem !important;
     font-weight: 700 !important;
-    color: #e0e0e0 !important;
+    color: var(--mpt-text) !important;
     letter-spacing: -0.025em !important;
 }
-
 .mpt-brand__version {
     font-size: 0.75rem !important;
-    color: #64748b !important;
+    color: var(--mpt-text-dim) !important;
     font-weight: 400 !important;
 }
 
-/* ── Status badges ───────────────────────────────────────────────────────── */
-.status-complete {
-    color: #34d399 !important;
-    font-weight: 600 !important;
-}
-
-.status-processing {
-    color: #fbbf24 !important;
-    font-weight: 600 !important;
-}
-
-.status-failed {
-    color: #f87171 !important;
-    font-weight: 600 !important;
-}
-
-.status-queued {
-    color: #94a3b8 !important;
-    font-weight: 600 !important;
-}
-
-.status-cancelled {
-    color: #94a3b8 !important;
-    font-weight: 600 !important;
-}
-
-/* ── Library thumbnail placeholders (status-tinted) ──────────────────────── */
-.thumb-status-complete { background: #064e35 !important; }
-.thumb-status-processing { background: #78350f !important; }
-.thumb-status-failed { background: #7f1d1d !important; }
-.thumb-status-queued { background: #374151 !important; }
-.thumb-status-complete { color: #34d399 !important; }
-.thumb-status-processing { color: #fbbf24 !important; }
-.thumb-status-failed { color: #f87171 !important; }
-.thumb-status-queued { color: #94a3b8 !important; }
-
-/* ── Empty state ─────────────────────────────────────────────────────────── */
+/* ── Empty state ───────────────────────────────────────────────────────────── */
 .empty-state {
     text-align: center !important;
     padding: 3rem 1rem !important;
-    color: #64748b !important;
+    color: var(--mpt-text-dim) !important;
 }
-
 .empty-state-icon {
     font-size: 3rem !important;
     margin-bottom: 1rem !important;
@@ -202,67 +424,71 @@ label[data-testid="stCheckbox"] span {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
 }
-
 .loading-shimmer {
     background: linear-gradient(90deg, #1a1a24 25%, #2a2a3a 50%, #1a1a24 75%) !important;
     background-size: 200% 100% !important;
     animation: shimmer 1.5s infinite !important;
-    border-radius: 8px !important;
+    border-radius: var(--mpt-radius) !important;
 }
 
-/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
     width: 6px !important;
     height: 6px !important;
 }
-
-::-webkit-scrollbar-track {
-    background: #0f0f14 !important;
-}
-
+::-webkit-scrollbar-track { background: var(--mpt-bg) !important; }
 ::-webkit-scrollbar-thumb {
     background: #2a2a3a !important;
     border-radius: 3px !important;
 }
+::-webkit-scrollbar-thumb:hover { background: #3a3a4a !important; }
 
-::-webkit-scrollbar-thumb:hover {
-    background: #3a3a4a !important;
+/* ── Tooltip ──────────────────────────────────────────────────────────────── */
+[data-testid="stTooltipIcon"] { color: var(--mpt-primary) !important; }
+
+/* ── Segment / segmented control ──────────────────────────────────────────── */
+div[data-testid="stSegmentControl"] button,
+div[data-testid="stSegmentedControl"] button {
+    border-radius: var(--mpt-radius-sm) !important;
+    min-height: 34px !important;
+    background: var(--mpt-surface-2) !important;
+    border: 1px solid var(--mpt-border) !important;
+    color: var(--mpt-text) !important;
 }
 
-/* ── Tooltip ─────────────────────────────────────────────────────────────── */
-[data-testid="stTooltipIcon"] {
-    color: #6366f1 !important;
+/* ── Drawer / card shadows for depth ──────────────────────────────────────── */
+div[data-testid="stContainer"][style*="border"] {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
 }
 
-/* ── Segment button ──────────────────────────────────────────────────────── */
-button[data-testid="stBaseButton-secondary"][kind="segment"] {
-    border-radius: 6px !important;
-    margin: 0 2px !important;
-}
+/* ── Library thumbnail placeholders (status-tinted) ──────────────────────── */
+.thumb-status-complete   { background: #064e35 !important; }
+.thumb-status-processing { background: #78350f !important; }
+.thumb-status-failed     { background: #7f1d1d !important; }
+.thumb-status-queued     { background: #374151 !important; }
+.thumb-status-complete   { color: #34d399 !important; }
+.thumb-status-processing { color: #fbbf24 !important; }
+.thumb-status-failed     { color: #f87171 !important; }
+.thumb-status-queued     { color: #94a3b8 !important; }
 
-/* ── Responsive: mobile ──────────────────────────────────────────────────── */
+/* ── Responsive: mobile ───────────────────────────────────────────────────── */
 @media (max-width: 480px) {
-    .mpt-brand {
-        font-size: 1.25rem !important;
+    .mpt-brand            { font-size: 1.25rem !important; }
+    .mpt-brand__version   { font-size: 0.7rem !important; }
+    .mpt-shell-headline   { font-size: 1.05rem !important; }
+
+    button[data-testid="stBaseButton-primary"],
+    button[data-testid="stBaseButton-secondary"] {
+        min-height: 34px !important;
+        font-size: 0.85rem !important;
+        padding: 0.4rem 0.7rem !important;
     }
 
-    .mpt-brand__version {
-        font-size: 0.7rem !important;
-    }
-
-    section[data-testid="stTabs"] button {
-        font-size: 0.75rem !important;
-        padding: 0 0.4rem !important;
-    }
-
-    button[data-testid="stBaseButton-secondary"],
-    button[data-testid="stBaseButton-primary"] {
-        min-height: 2.5rem !important;
-        font-size: 0.8rem !important;
-    }
+    /* Metric label text a touch smaller on mobile. */
+    div[data-testid="stMetric"] { padding: 0.55rem 0.7rem !important; }
 }
 
-/* ── Responsive: tablet ──────────────────────────────────────────────────── */
+/* ── Responsive: tablet ───────────────────────────────────────────────────── */
 @media (min-width: 481px) and (max-width: 768px) {
-    /* Tablet-specific adjustments */
+    .mpt-shell-headline { font-size: 1.1rem !important; }
 }

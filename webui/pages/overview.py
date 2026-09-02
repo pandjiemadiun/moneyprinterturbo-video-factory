@@ -46,9 +46,10 @@ def render_overview():
     """Render the Overview dashboard (default landing)."""
     render_nav_shell(active="")
 
+    # Headline (### Overview) is owned by the app shell (nav_shell) so the
+    # page never repeats the title -- this is a muted subtitle only.
     st.markdown(
-        "<h1 style='margin-bottom: 0.25rem;'>Overview</h1>"
-        "<p style='color: #64748b; margin-top: 0; margin-bottom: 1.5rem;'>"
+        "<p class='mpt-page-sub' style='margin-bottom:1.5rem;'>"
         "Video Factory status at a glance. Real data only.</p>",
         unsafe_allow_html=True,
     )

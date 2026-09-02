@@ -45,9 +45,9 @@ from webui.shared import (
 def render_create():
     """Render the Create page."""
     render_nav_shell(active="render_create")
+    # Headline (### Create) is owned by the app shell (nav_shell).
     st.markdown(
-        "<h1 style='margin-bottom: 0.25rem;'>Create</h1>"
-        "<p style='color: #64748b; margin-top: 0; margin-bottom: 1.5rem;'>"
+        "<p class='mpt-page-sub' style='margin-bottom:1.5rem;'>"
         "Generate a video from your topic. Guided workflow with progressive disclosure.</p>",
         unsafe_allow_html=True,
     )
