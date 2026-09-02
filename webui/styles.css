@@ -330,6 +330,35 @@ div[class*="st-key-opportunity_card"] {
     margin-top: 2px !important;
 }
 
+/* ── Responsive action rows (Phase 15G, Class R1) ───────────────────────────
+   Root cause: `st.columns(3)` / `st.columns(5)` forced N equal columns all the
+   way down to 320px, starving each action button to ~50-90px and shattering
+   labels ("Open/Librar/y", "Clean Cache Now" -> 5 lines at 192px tall).
+
+   Contract: every labelled action group that previously used st.columns now
+   lives in a single flex-wrap row keyed `quick_actions_row` / `cleanup_actions` /
+   `cache_actions`. Each contained button has a 160px minimum, so on narrow
+   screens the row WRAPS to fewer (or 1) column instead of squeezing words; on
+   desktop it stays multi-column (flex-grow distributes free space). One
+   non-media rule (Streamlit 1.59 ignores @media in injected <style>). No
+   st.columns, no width starvation. Scoped to the three explicit container keys
+   -- does NOT touch generic stHorizontalBlock. */
+div[class*="st-key-quick_actions_row"],
+div[class*="st-key-cleanup_actions"],
+div[class*="st-key-cache_actions"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: var(--mpt-space-2) !important;     /* 8px */
+    width: 100% !important;
+}
+div[class*="st-key-quick_actions_row"] [data-testid="stButton"],
+div[class*="st-key-cleanup_actions"] [data-testid="stButton"],
+div[class*="st-key-cache_actions"] [data-testid="stButton"] {
+    flex: 1 1 160px !important;             /* min 160 -> wraps instead of squeezing */
+    min-width: 140px !important;
+    width: auto !important;                 /* let flex basis drive, not 100% */
+}
+
 
 /* Hidden contract metrics (st.metric inside st.container for AppTest). */
 div[data-testid="stContainer"] div[data-testid="stMetric"] {

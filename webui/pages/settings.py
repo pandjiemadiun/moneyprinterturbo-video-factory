@@ -314,23 +314,26 @@ def _render_cache_settings():
 
     confirm_nonce = st.session_state.get("video_cache_cleanup_confirm_nonce", 0)
     confirmed = st.checkbox(tr("Confirm Cache Cleanup"), key=f"video_cache_cleanup_confirm_{confirm_nonce}")
-    refresh_col, open_col, cleanup_col = st.columns(3)
-    if refresh_col.button(tr("Refresh Cache Stats"), key="refresh_video_cache_stats", use_container_width=True, icon=":material/refresh:"):
-        get_video_cache_stats.clear()
-        st.rerun(scope="fragment")
-    if open_col.button(tr("Open Cache Directory"), key="open_video_cache_directory", use_container_width=True, icon=":material/folder_open:"):
-        webbrowser.open(Path(cache_manager.video_cache_dir()).as_uri())
-    cleanup_disabled = not confirmed or cleanup_preview.file_count == 0
-    if cleanup_col.button(tr("Clean Cache Now"), key="clean_video_cache_now", type="primary", disabled=cleanup_disabled, use_container_width=True, icon=":material/delete_sweep:"):
-        result = cache_manager.clean_video_cache(max_age_days=max_age_days)
-        message_key = "Cache Cleanup Completed With Failures" if result.failed_count else "Cache Cleanup Completed"
-        st.session_state["video_cache_cleanup_message"] = (
-            "warning" if result.failed_count else "success",
-            tr(message_key).format(count=result.deleted_count, size=format_file_size(result.deleted_size), failed=result.failed_count),
-        )
-        st.session_state["video_cache_cleanup_confirm_nonce"] = confirm_nonce + 1
-        get_video_cache_stats.clear()
-        st.rerun(scope="fragment")
+    # Class R1 fix: st.columns(3) starved each button to ~50px and wrapped
+    # "Clean Cache Now" to 5 lines on 320px. Same .mpt-action-row contract:
+    # min 160px, wrap to fewer columns on narrow screens.
+    with st.container(key="cache_actions"):
+        if st.button(tr("Refresh Cache Stats"), key="refresh_video_cache_stats", use_container_width=True, icon=":material/refresh:"):
+            get_video_cache_stats.clear()
+            st.rerun(scope="fragment")
+        if st.button(tr("Open Cache Directory"), key="open_video_cache_directory", use_container_width=True, icon=":material/folder_open:"):
+            webbrowser.open(Path(cache_manager.video_cache_dir()).as_uri())
+        cleanup_disabled = not confirmed or cleanup_preview.file_count == 0
+        if st.button(tr("Clean Cache Now"), key="clean_video_cache_now", type="primary", disabled=cleanup_disabled, use_container_width=True, icon=":material/delete_sweep:"):
+            result = cache_manager.clean_video_cache(max_age_days=max_age_days)
+            message_key = "Cache Cleanup Completed With Failures" if result.failed_count else "Cache Cleanup Completed"
+            st.session_state["video_cache_cleanup_message"] = (
+                "warning" if result.failed_count else "success",
+                tr(message_key).format(count=result.deleted_count, size=format_file_size(result.deleted_size), failed=result.failed_count),
+            )
+            st.session_state["video_cache_cleanup_confirm_nonce"] = confirm_nonce + 1
+            get_video_cache_stats.clear()
+            st.rerun(scope="fragment")
 
 
 def _render_interface_settings():

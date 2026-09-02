@@ -139,21 +139,25 @@ def render_overview():
         st.divider()
 
     # ── Quick actions ──────────────────────────────────────────────────────
+    # Class R1 fix (Phase 15G): `st.columns(3)` squeezed three labelled buttons
+    # into ~90px columns on 320px and shattered "Open Library" -> "Open/Librar/y".
+    # The buttons now live in a single `.mpt-action-row` flex-wrap container:
+    # each button has a 160px minimum so on narrow screens the row wraps to
+    # fewer (or 1) column instead of squeezing words; on desktop it stays
+    # multi-column (flex-grow distributes the extra space). Streamlit 1.59
+    # ignores @media in injected <style>, so this is one non-media rule -- no
+    # st.columns, no width starvation, explicit mobile contract.
     st.markdown("<b>Quick actions</b>", unsafe_allow_html=True)
-    qa1, qa2, qa3 = st.columns(3)
-    with qa1:
+    with st.container(key="quick_actions_row"):
         if st.button("🔍 Discover Ideas", key="overview_discover", type="primary", use_container_width=True):
             from webui.nav_pages import discover_page
             st.switch_page(discover_page)
-    with qa2:
         if st.button("🎬 Create Video", key="overview_create", type="primary", use_container_width=True):
             from webui.nav_pages import create_page
             st.switch_page(create_page)
-    with qa3:
         if st.button("📚 Open Library", key="overview_library", type="primary", use_container_width=True):
             from webui.nav_pages import library_page
             st.switch_page(library_page)
-
     st.divider()
 
     # ── Recent activity (real tasks, newest first) ─────────────────────────
