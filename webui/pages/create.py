@@ -58,9 +58,12 @@ def render_create():
     params = VideoParams(video_subject="")
     params.match_materials_to_script = bool(st.session_state.get("match_materials_to_script", False))
 
-    # ── Step 1: Topic ──────────────────────────────────────────────────────
+    # ── Selected opportunity context (from Discover / Review) ──────────────
+    _render_selected_opportunity_banner()
+
+    # ── Step 1: IDEA ───────────────────────────────────────────────────────
     with st.container(border=True):
-        st.subheader("1. Content")
+        st.subheader("① IDEA")
         params.video_subject = st.text_area(
             tr("Video Subject"),
             placeholder=tr("Video Subject Placeholder"),
@@ -81,9 +84,9 @@ def render_create():
         params.video_language = selected_language_code
         _set_runtime_config("ui", "video_language", params.video_language)
 
-    # ── Step 2: Script & Keywords ──────────────────────────────────────────
+    # ── Step 2: CREATIVE BRIEF ─────────────────────────────────────────────
     with st.container(border=True):
-        st.subheader("2. Script & Keywords")
+        st.subheader("② Creative Brief")
 
         # Script generation backend
         script_backend_options = ["local", "loomloom"]
@@ -123,9 +126,9 @@ def render_create():
 
         params.video_terms = st.text_area(keywords_label, help=keywords_help, key="video_terms")
 
-    # ── Step 3: Video Settings ─────────────────────────────────────────────
+    # ── Step 3: PRODUCTION SETTINGS — VISUALS ──────────────────────────────
     with st.container(border=True):
-        st.subheader("3. Visuals")
+        st.subheader("③ Production Settings — Visuals")
 
         video_sources = [
             (tr("Pexels"), "pexels"), (tr("Pixabay"), "pixabay"), (tr("Coverr"), "coverr"),
@@ -184,9 +187,9 @@ def render_create():
         )
         _set_runtime_config("ui", "video_count", params.video_count)
 
-    # ── Step 4: Audio Settings ─────────────────────────────────────────────
+    # ── Step 4: PRODUCTION SETTINGS — VOICE ────────────────────────────────
     with st.container(border=True):
-        st.subheader("4. Voice")
+        st.subheader("④ Production Settings — Voice")
 
         voice_mode_options = [VOICE_MODE_TTS, VOICE_MODE_UPLOAD, VOICE_MODE_NONE]
         voice_mode_labels = {
@@ -332,9 +335,9 @@ def render_create():
             if uploaded_audio_file:
                 st.audio(uploaded_audio_file, format="audio/mp3")
 
-    # ── Step 5: Subtitle Settings ───────────────────────────────────────────
+    # ── Step 5: STYLE ──────────────────────────────────────────────────────
     with st.container(border=True):
-        st.subheader("5. Style")
+        st.subheader("⑤ Style")
         st.session_state.setdefault("subtitle_enabled_checkbox", _saved_ui_bool("subtitle_enabled", DEFAULT_SUBTITLE_SETTINGS["subtitle_enabled"]))
         params.subtitle_enabled = st.checkbox(tr("Enable Subtitles"), key="subtitle_enabled_checkbox")
         _set_runtime_config("ui", "subtitle_enabled", params.subtitle_enabled)
@@ -373,10 +376,24 @@ def render_create():
     with st.expander("Advanced Options", expanded=False):
         _render_advanced_options(params)
 
-    # ── Generate button ────────────────────────────────────────────────────
+    # ── Launch (primary action) ────────────────────────────────────────────
+    # The production workspace ends at a single, unambiguous call to produce.
+    # prepare_generation_task() is the on_click contract: it seeds an in-session
+    # active task; _handle_generation_submit() then POSTs to /api/v1/videos.
+    # The pipeline trigger is UNCHANGED -- only the product framing and label.
     st.divider()
+
+    has_input = bool(params.video_subject) or bool(st.session_state.get("video_script"))
+    if has_input:
+        st.caption(
+            "✅ Ready to produce · Estimated pipeline: "
+            "Script → Materials → Audio → Composition"
+        )
+    else:
+        st.caption("⚠️ Enter a video subject to produce.")
+
     start_button = st.button(
-        tr("Generate Video"), use_container_width=True, type="primary",
+        tr("Launch Production"), use_container_width=True, type="primary",
         key="generate_video_button", on_click=prepare_generation_task,
     )
 
@@ -390,7 +407,7 @@ def render_create():
 
 
 def _consume_prefill_values():
-    """Transfer prefill values from Discover/Explore into widget state keys."""
+    """Transfer prefill values from Discover/Review into widget state keys."""
     prefill_map = {
         "prefill_video_subject": "video_subject",
         "prefill_video_script_prompt": "video_script_prompt",
@@ -400,6 +417,39 @@ def _consume_prefill_values():
         if prefill_key in st.session_state and st.session_state[prefill_key]:
             st.session_state[widget_key] = st.session_state[prefill_key]
             st.session_state[prefill_key] = ""
+
+
+def _render_selected_opportunity_banner():
+    """Contextual header showing the opportunity driving this production.
+
+    When a user arrives from Discover/Review (via the prefill contract), surface
+    the selected topic so the production workspace always answers
+    'WHAT AM I MAKING?'. Offers a one-click 'Change' back to Discover. Real data
+    only -- reads session state that the prefill contract populates.
+    """
+    review_item = st.session_state.get("review_item")
+    subject = (st.session_state.get("video_subject") or "").strip()
+    topic = (review_item or {}).get("topic") or subject
+    if not topic:
+        return
+    providers = (review_item or {}).get("providers", [])
+    feasibility = (review_item or {}).get("visual_feasibility", "")
+    score = (review_item or {}).get("score_total") or (review_item or {}).get("confidence")
+    badge = "✅ PRODUCIBLE" if (providers and feasibility != "Low") else "⚠️ Review before producing"
+    score_span = f"<span style='color:#64748b'>score {score:.0%}</span>" if score else ""
+    st.markdown(
+        f"<div class='selected-opportunity-banner'>"
+        f"<div style='display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap'>"
+        f"<b style='color:#0f172a'>{topic}</b>"
+        f"<span style='color:#16a34a'>{badge}</span>"
+        f"{score_span}"
+        f"</div></div>",
+        unsafe_allow_html=True,
+    )
+    if st.button("Change topic →", key="create_change_topic", type="secondary", use_container_width=False):
+        from webui.nav_pages import discover_page
+        st.switch_page(discover_page)
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 
 
 def _effective_script_generation_backend():

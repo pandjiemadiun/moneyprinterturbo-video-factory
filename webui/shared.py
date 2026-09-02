@@ -642,6 +642,82 @@ def task_manager_label(processing_count):
     return f"{label} · {processing_count}"
 
 
+# ── Dashboard helpers (real data, read-only) ───────────────────────────────
+
+# Page sizes large enough to fetch the full task history in one round-trip.
+# The API ``GET /tasks`` imposes no upper cap on page_size (Query(ge=1) only),
+# so requesting a large page returns every task for accurate dashboard totals.
+_DASHBOARD_TASK_PAGE_SIZE = 1000
+
+
+def fetch_all_runtime_tasks():
+    """Fetch ALL tasks from the API in a single large page (real totals, read-only).
+
+    Returns the raw API task list. ``api_list_tasks`` already swallows transport
+    errors (returns ``([], 0)``), so an empty result means "no tasks or API
+    unreachable" -- callers must treat an empty list as "no data" (never fake).
+    """
+    try:
+        tasks, _total = webui_api_client.api_list_tasks(1, _DASHBOARD_TASK_PAGE_SIZE)
+    except Exception as e:
+        logger.warning(f"failed to load runtime tasks for dashboard: {e}")
+        return []
+    return list(tasks or [])
+
+
+def get_dashboard_state():
+    """Real, read-only aggregate state for the Overview dashboard.
+
+    Returns ``(counts, active_session_tasks, total)`` where ``counts`` is a dict
+    with real per-state totals (queued/processing/complete/failed/cancelled),
+    ``active_session_tasks`` is the in-flight set this WebUI session owns
+    (not yet flushed to the task DB), and ``total`` is the API task count.
+    NEVER fakes numbers: if the API unreachable, counts are 0 and total is 0.
+    """
+    tasks = fetch_all_runtime_tasks()
+    counts = {
+        "queued": 0, "processing": 0, "complete": 0,
+        "failed": 0, "cancelled": 0,
+    }
+    for task in tasks:
+        state = normalize_task_state(task.get("state"))
+        if state == const.TASK_STATE_COMPLETE:
+            counts["complete"] += 1
+        elif state == const.TASK_STATE_PROCESSING:
+            counts["processing"] += 1
+        elif state == const.TASK_STATE_QUEUED:
+            counts["queued"] += 1
+        elif state == const.TASK_STATE_CANCELLED:
+            counts["cancelled"] += 1
+        elif state == const.TASK_STATE_FAILED:
+            counts["failed"] += 1
+    total = len(tasks)
+    return counts, dict(active_generation_tasks()), total
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_storage_usage():
+    """Real total size (bytes) + file count of the configured storage directory.
+
+    Read-only filesystem walk; cached for 60s. In production this resolves to
+    ``/MoneyPrinterTurbo/storage`` (bind-mounted from /opt/MoneyPrinterTurbo/storage).
+    NEVER mutates storage; never fakes the figure.
+    """
+    storage_root = utils.storage_dir()
+    total_bytes = 0
+    file_count = 0
+    if os.path.isdir(storage_root):
+        for root, _dirs, files in os.walk(storage_root):
+            for name in files:
+                full = os.path.join(root, name)
+                try:
+                    total_bytes += os.path.getsize(full)
+                    file_count += 1
+                except OSError:
+                    pass
+    return total_bytes, file_count
+
+
 def build_video_download_name(subject, index, total):
     safe_subject = _DOWNLOAD_FILENAME_INVALID_PATTERN.sub(" ", str(subject or ""))
     safe_subject = re.sub(r"\s+", " ", safe_subject).strip(" .")[:80].rstrip(" .")

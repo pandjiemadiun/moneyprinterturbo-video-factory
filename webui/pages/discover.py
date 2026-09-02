@@ -124,7 +124,7 @@ _CATEGORIES = ["general", "technology", "business", "sports", "entertainment", "
 
 def render_discover():
     """Render the Discover page (primary landing — 'What should I make?')."""
-    render_nav_shell(active="")
+    render_nav_shell(active="render_discover")
     st.markdown(
         "<h1 style='margin-bottom: 0.25rem;'>Discover</h1>"
         "<p style='color: #64748b; margin-top: 0; margin-bottom: 1rem;'>"
@@ -208,9 +208,47 @@ def render_discover():
     if not hypotheses and not opportunities:
         st.info(tr("No results. Try adjusting the filters or fetching live data."))
 
+    # Raw intelligence (Trends / Patterns) -- progressive disclosure. This is the
+    # deep-intelligence surface that used to live on the retired Explore page;
+    # folding it in here makes Discovery a single, no-longer-confusing workspace.
+    _render_raw_intelligence(result)
+
     st.divider()
     if st.button(tr("Refresh"), key="discover_refresh", use_container_width=True, icon=":material/sync:"):
         _fetch_opportunities(geo, language, category)
+
+
+def _render_raw_intelligence(result):
+    """Progressive-disclosure deep-intel: Trends + Patterns (retired Explore views)."""
+    trends = result.get("trends", []) or []
+    patterns = result.get("patterns", []) or []
+    if not trends and not patterns:
+        return
+    with st.expander(tr("Raw Intelligence (Advanced)"), expanded=False):
+        if trends:
+            st.caption(tr("Content Ideas"))
+            for i, trend in enumerate(trends[:10]):
+                cols = st.columns([3, 2, 2])
+                with cols[0]:
+                    st.markdown(f"**{trend.get('topic', 'Unknown')}**")
+                with cols[1]:
+                    st.caption(f"Strength: {trend.get('strength', 0):.2f}")
+                with cols[2]:
+                    st.caption(f"Freshness: {trend.get('freshness', 0):.2f}")
+                evidence = trend.get("evidence", []) or []
+                source_url = None
+                for ev in evidence:
+                    if isinstance(ev, str) and ev.startswith(("url=", "source_url=")):
+                        source_url = ev.split("=", 1)[1]
+                        break
+                if source_url:
+                    st.link_button("Open Source", url=source_url, key=f"discover_trend_source_{i}")
+        if patterns:
+            st.markdown("---")
+            st.caption("Viral Patterns")
+            for i, pattern in enumerate(patterns[:5]):
+                st.markdown(f"**{pattern.get('name', 'Unknown')}** — {pattern.get('pattern_type', 'N/A')}")
+                st.caption(pattern.get("description", "N/A"))
 
 
 def _render_recommended_opportunities():
