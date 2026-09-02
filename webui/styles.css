@@ -359,6 +359,29 @@ div[class*="st-key-cache_actions"] [data-testid="stButton"] {
     width: auto !important;                 /* let flex basis drive, not 100% */
 }
 
+/* ── Card action hierarchy (Phase 15G, Class R2/R3) ────────────────────────
+   Root cause: Library task cards used `st.columns([3,1,2])` with the 2-6
+   action column shrunk to ~47px on 320px, clipping "Open folder"->"Downloa/d"
+   and "Delete"/"Retry" (41 width-starved buttons per page).
+
+   This is a DISTINCT contract from .mpt-action-row (R1): it is a multi-column
+   card LAYOUT, not a loose button group. The card columns stay [3:1:2] on
+   desktop (flex-grow distributes space) but the stColumn flex-basis is set to
+   200px with flex-wrap enabled. Below ~600px the columns can no longer fit side
+   by side, so the ACTION column (col3) wraps onto its own full-width row BELOW
+   the metadata -- "action buttons below card metadata, stacked full-width
+   actions" (one of the PO's accepted mobile card contracts). col3 then spans the
+   full ~288px card width and every label fits on one line. Non-media
+   (Streamlit 1.9 ignores @media in injected <style>). Scoped to st-key-task_card
+   only -- does not affect other stColumn/stHorizontalBlock usage. */
+div[class*="st-key-task_card"] [data-testid="stHorizontalBlock"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+}
+div[class*="st-key-task_card"] [data-testid="stColumn"]:nth-child(1) { flex: 3 1 200px !important; min-width: 0 !important; width: auto !important; }  /* thumb + subject */
+div[class*="st-key-task_card"] [data-testid="stColumn"]:nth-child(2) { flex: 1 1 200px !important; min-width: 0 !important; width: auto !important; }  /* status badge */
+div[class*="st-key-task_card"] [data-testid="stColumn"]:nth-child(3) { flex: 2 1 200px !important; min-width: 0 !important; width: auto !important; }  /* actions -> full width on mobile */
+
 
 /* Hidden contract metrics (st.metric inside st.container for AppTest). */
 div[data-testid="stContainer"] div[data-testid="stMetric"] {
