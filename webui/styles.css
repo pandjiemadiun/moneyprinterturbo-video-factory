@@ -377,10 +377,17 @@ div[class*="st-key-discover_filters"] {
     gap: var(--mpt-space-2) !important;     /* 8px between filters */
     align-items: flex-end !important;       /* align stSelectbox widgets */
 }
-div[class*="st-key-discover_filters"] [data-testid="stSelectbox"] {
+/* The direct flex children are Streamlit stElementContainer wrappers around each
+   stSelectbox (root > stElementContainer > stSelectbox). flex:1 1 220px on those
+   containers gives 3-across on wide screens, one-per-row (>=200px, full-width)
+   on mobile. Scoped to our owned container only. */
+div[class*="st-key-discover_filters"] [data-testid="stElementContainer"] {
     flex: 1 1 220px !important;
     min-width: 200px !important;
     width: auto !important;
+}
+div[class*="st-key-discover_filters"] [data-testid="stSelectbox"] {
+    width: 100% !important;                 /* selectbox widget fills its container */
 }
 
 /* ── Card action hierarchy (Phase 15G, Class R2/R3) ────────────────────────
