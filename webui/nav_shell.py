@@ -141,8 +141,13 @@ def render_nav_shell(active=""):
             st.divider()
 
             # Explicit close affordance (the hamburger toggle also closes).
+            # NOTE: st.button callbacks do NOT auto-rerun, and this button lives
+            # *inside* the drawer -- so without st.rerun() the drawer is rendered
+            # before the flag is cleared and stays visually open until the next
+            # interaction. st.rerun() forces a re-render with the flag cleared.
             if st.button("✕ Close", key="nav_close", use_container_width=True):
                 st.session_state[_SESSION_NAV] = False
+                st.rerun()
 
             st.divider()
             _render_language()
