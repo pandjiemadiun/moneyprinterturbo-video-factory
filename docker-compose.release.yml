@@ -11,6 +11,8 @@ services:
     command: [ "streamlit", "run", "./webui/Main.py", "--server.address=0.0.0.0", "--server.port=8501", "--browser.serverAddress=https://goldtrader.website", "--server.enableCORS=True", "--browser.gatherUsageStats=False", "--client.toolbarMode=minimal", "--logger.hideWelcomeMessage=True", "--server.showEmailPrompt=False" ]
     volumes: *common-volumes
     restart: always
+    networks:
+      - mpt-network
   api:
     image: ghcr.io/harry0703/moneyprinterturbo:latest
     container_name: "moneyprinterturbo-api"
@@ -21,6 +23,8 @@ services:
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - mpt-network
   bgutil-provider:
     image: ghcr.io/antaloo/bgutil-ytdlp-pot-provider:latest
     container_name: "bgutil-provider"

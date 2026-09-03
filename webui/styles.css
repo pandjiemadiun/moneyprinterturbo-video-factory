@@ -549,9 +549,15 @@ div[data-testid="stTabs"] [data-testid="stTabPanel"] {
 
 /* Compact tabs on narrow screens. */
 @media (max-width: 768px) {
+    div[data-testid="stTabs"] [role="tablist"] {
+        /* Scroll-snap so a swipe lands on a whole tab (not a half-clipped one),
+           making every tab -- including "Voice & Audio" -- comfortably reachable. */
+        scroll-snap-type: x mandatory !important;
+    }
     div[data-testid="stTabs"] div[data-testid="stTab"] {
         font-size: 0.8rem !important;
         padding: 0.4rem 0.6rem !important;
+        scroll-snap-align: start !important;
     }
 }
 
@@ -731,4 +737,90 @@ div[data-testid="stContainer"][style*="border"] {
 /* ── Responsive: tablet ───────────────────────────────────────────────────── */
 @media (min-width: 481px) and (max-width: 768px) {
     .mpt-shell-headline { font-size: 1.1rem !important; }
+}
+
+/* ── LLM form + contextual help (Phase 15H mobile remediation) ──────────────
+   Root cause (original b0de54c, verified by REAL-browser geometry at 320px):
+   Settings rendered `st.columns([0.9, 1.1])` for the LLM form + help panel.
+   Over the global `stHorizontalBlock { flex-wrap: wrap }`, flex-shrink collapsed
+   the form column to its MIN-CONTENT (~66px at 320px) while the help alert's
+   long text kept the help column wide (~206px). Result: "Kimi API Platform"
+   label fragmented to 5-7 lines; API Key / Base Url / Model Name inputs were
+   21-105px (practically untappable); horizontal overflow.
+
+   A previous fix attempt layered a `div[class*="st-key-llm_form_help_row"]`
+   wrapper with `flex:1 1 280px` on the columns PLUS a
+   `:has([data-testid="stInfo"]) { flex-basis:100% }` rule. That attempt was
+   ITSELF broken: it set `display:flex` on the keyed stVerticalBlock (the wrong
+   parent -- the columns' real flex parent is the inner stHorizontalBlock) and
+   the `:has(stInfo)` rule collapsed the help column to a 15px x ~2400px sliver
+   (alert text 0px wide). It also carried a `)` vs `]` CSS syntax error in the
+   tab-fade selector that silently dropped that whole rule.
+
+   Correct contract (PROVEN: @media IS honoured by Streamlit 1.59.1 injected
+   <style> -- the codebase's "no @media" assumption was FALSE. Real-browser
+   geometry confirms the stacked layout):
+     * MOBILE (<=639px): form and help STACK, each full-width. The primary form
+       gets the full practical width (inputs ~260px at 320px); help stays
+       reachable directly beneath it. The 0.9:1.1 ratio is irrelevant once
+       stacked -- every control becomes wide enough to tap.
+     * DESKTOP/TABLET (>=640px): untouched -- Streamlit's 0.9:1.1 side-by-side
+       layout is preserved (form ~267px at 768px, usable). */
+@media (max-width: 639px) {
+    /* IMPORTANT -- two competing rules both target these stColumns:
+       (a) the GLOBAL header rule (lines 124-137): `stHorizontalBlock:first-of-type
+           stColumn:first-child/last-child { flex:0 0 auto / 1 1 0 !important }` is
+           specificity (0,4,2). It was meant ONLY for the nav header, but
+           `:first-of-type` also matches THIS form's stHorizontalBlock, so it starves
+           the form column (min-width 56px) and shrinks the help column to ~15px.
+       (b) Streamlit emotion stColumn classes (0,3,0).
+
+       To beat BOTH, we scope under the LLM-only keyed ancestor
+       `st-key-llm_form_help_row` (so the header is untouched) and add the
+       `[data-testid="stHorizontalBlock"] + div + .stColumn` chain. Resulting
+       specificity (0,4,3) > (0,4,2), so this LLM-ONLY override wins where the
+       previous (0,3,1) rule was silently clobbered. The header global rule
+       stays intact (header is not a descendant of the LLM key). */
+    div[class*="st-key-llm_form_help_row"] [data-testid="stHorizontalBlock"] div[data-testid="stColumn"].stColumn {
+        flex: 1 1 100% !important;        /* each column takes the full line when wrapped */
+        min-width: 280px !important;     /* hard floor: controls stay tappable/usable */
+        width: auto !important;
+        margin: 0 !important;            /* neutralise the header's 8px last-child gap */
+    }
+    div[class*="st-key-llm_form_help_row"] [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;      /* let the two columns drop onto separate lines */
+        align-items: flex-start !important;
+    }
+}
+
+/* ── Settings tab strip — mobile scroll affordance ──────────────────────────
+   The six Settings tabs (~730px total: Video, AI & Script, Voice & Audio,
+   Footage Providers, Discovery, System) cannot fit a 320-412px viewport. The
+   tab bar is horizontally scrollable (overflow-x:auto is already set). The PO
+   defect: the right edge gave NO signal that more tabs exist -- the previous
+   `role="tablist"]::after` fade rule was silently dropped by a CSS syntax error
+   (`:last-child)::after` used ')' instead of ']'), so three tabs were hidden
+   behind an ambiguous, half-clipped "Voice & Audio" edge.
+
+   Fix: a right-edge fade gradient that appears ONLY on narrow viewports where
+   the tabs are guaranteed to overflow (gated by @media so it never muddies the
+   desktop layout where all six fit). A visible scrollbar + scroll-padding-right
+   keep every tab reachable and fully readable when scrolled into view. */
+@media (max-width: 768px) {
+    div[data-testid="stTabs"] [role="tablist"] {
+        position: relative !important;
+        scroll-padding-right: 32px !important;
+        padding-right: 6px !important;
+    }
+    div[data-testid="stTabs"] [role="tablist"]::after {
+        content: "" !important;
+        position: absolute !important;
+        top: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        width: 28px !important;
+        background: linear-gradient(to right, rgba(15,15,20,0), rgba(15,15,20,0.85) 85%) !important;
+        pointer-events: none !important;
+        z-index: 2 !important;
+    }
 }
