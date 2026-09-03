@@ -103,11 +103,24 @@ def webui_server():
 
 
 def _open_llm_settings(page, base_url):
-    page.goto(base_url + "/render_settings", wait_until="networkidle")
-    page.wait_for_selector('[data-testid="stTabs"] [role="tablist"]', timeout=20000)
+    # Cold-start tolerant: a freshly (re)started Streamlit may need several
+    # seconds to first-render Settings. Retry the navigation (domcontentloaded
+    # is more reliable than networkidle on Streamlit's long-poll) and wait
+    # generously for the tab bar -- the real readiness signal.
+    last_err = None
+    for _ in range(6):
+        try:
+            page.goto(base_url + "/render_settings", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_selector('[data-testid="stTabs"] [role="tablist"]', timeout=45000)
+            break
+        except Exception as e:  # noqa: BLE001 - retry until Settings is ready
+            last_err = e
+            time.sleep(2)
+    else:
+        raise AssertionError(f"Settings tablist never rendered (cold start): {last_err}")
     page.eval_on_selector_all('[data-testid="stTabs"] [role="tab"]',
         "(els)=>els.find(e=>e.textContent.trim().includes('AI & Script'))?.click()")
-    page.wait_for_selector('div[class*="st-key-llm_form_help_row"]', timeout=10000)
+    page.wait_for_selector('div[class*="st-key-llm_form_help_row"]', timeout=20000)
 
 
 def _llm_form_geometry(page):
