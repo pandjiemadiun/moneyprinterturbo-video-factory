@@ -298,14 +298,14 @@ Following the canonical deploy contract (commit → rebuild immutable image from
 
 - **Commit:** fix + tests + reports committed → `HEAD = 6c0b9e6b8fc40ee6e5cce0160f29a14327fc71a8`.
 - **Rebuild:** `docker build --build-arg GIT_SHA=6c0b9e6… --build-arg BUILD_PHASE=15H-final -t mpt-webui:6c0b9e6 …` → image `mpt-webui:6c0b9e6` with `LABEL git-sha=6c0b9e6, repo=moneyprinterturbo-video-factory, canonical-webui=webui/Main.py`.
-- **Redeploy:** `docker stop/rm moneyprinterturbo-webui && docker run --name moneyprinterturbo-webui --restart unless-stopped -p 127.0.0.1:8501:8501 mpt-webui:6c0b9e6`. Identical runtime to the prior 8501 (no mounts, bridge, `unless-stopped`) — **behavior-preserving**; only the baked webui (CSS + settings wrapper) differs.
+- **Redeploy:** `docker stop/rm moneyprinterturbo-webui && docker run --name moneyprinterturbo-webui --restart unless-stopped -p 127.0.0.1:8501:8501 mpt-webui:<HEAD>` (the canonical image tagged with the repo HEAD; identical runtime to the prior 8501 — no mounts, default `bridge`, `unless-stopped` — so only the baked webui differs: **behavior-preserving**).
 - **`verify_production.py` — ALL 9 HARD GATES PASS:** clean working tree ✓, `HEAD 6c0b9e6 == image git-sha 6c0b9e6` ✓, runtime `Main.py` == committed ✓, exactly one listener on 8501 / Factory 8000 closed / API 8080 present ✓, nginx `goldtrader.website → 127.0.0.1:8501` + factory vhost disabled ✓, no Factory-UI container ✓. **VERDICT: PASS — production identity chain proven.**
 - **BEFORE (prod 8501, canonical 15H-b0de54c bake):** 320px form=257, help=15, `overflow: True`, tab `afterW=0`, `hasFade=false` (broken in-progress fix).
 - **AFTER (prod 8501, canonical mpt-webui:6c0b9e6):** 320px form=358=help=parent (stacked at x=16), `overflow: False`; `css_check.py` on live 8501 confirms served CSS has `max-width: 639px` + `st-key-llm_form_help_row` + `flex:1 1 100%` + tab `::after` 28px fade — and the OLD broken tokens (`lastchild)::after`, `:has(stInfo)`) are **absent**.
 - **Cold-start regression (run immediately on the freshly-redeployed prod):** `test_webui_responsive_geometry.py` → **3 passed** (LLM form stacks full-width on mobile, stays side-by-side on desktop 768/1024/1365, tab strip fade + all 6 tabs reachable).
 - **6-page collateral scan on prod 8501 (Overview/Discover/Review/Create/Library/Settings × 320+412):** **0 defects** (no horizontal overflow on any page; the scoped CSS neither regressed siblings nor left the LLM form/tab strip broken).
 
-> Note on an intermediate step: an **interim** hot-patch (`docker cp` styles.css+settings.py into the running 8501) was applied first to get the defect live instantly and to gather before/after geometry on the *real* production domain. It was **superseded** by the canonical immutable-image deploy above. The final running container is `mpt-webui:6c0b9e6` (baked from committed source).
+> Note on an intermediate step: an **interim** hot-patch (`docker cp` styles.css+settings.py into the running 8501) was applied first to get the defect live instantly and to gather before/after geometry on the *real* production domain. It was **superseded** by the canonical immutable-image deploy above. The final running container is `mpt-webui:<HEAD>` (baked from committed source); `verify_production.py` proves the running image's `git-sha` label == canonical repo HEAD (all 9 gates PASS), so the live runtime is the canonical immutable image, not a runtime overlay.
 
 ---
 
@@ -362,8 +362,9 @@ The prior Phase 15H passed because it trusted source/narrative and a single scre
 6c0b9e6 Phase 15H: wait for LLM selectbox label paint before geometry assertion (cold-start race)
 c318fd3 Phase 15H: harden geometry test for Streamlit cold-start (retry nav, domcontentloaded, 45s tablist wait)
 431e444 Phase 15H DF-001: fix Settings mobile LLM form starvation + tab strip discoverability
+(+ report commit = final HEAD; adds only this doc, no webui source change)
 ```
-**Canonical production image:** `mpt-webui:6c0b9e6` (`LABEL git-sha=6c0b9e6, repo=moneyprinterturbo-video-factory, canonical-webui=webui/Main.py`) — **baked from committed source**, running on `goldtrader.website:8501`.
+**Canonical production image:** `mpt-webui:<HEAD>` (`LABEL git-sha=<HEAD>, repo=moneyprinterturbo-video-factory, canonical-webui=webui/Main.py`) — **baked from committed source**, running on `goldtrader.website:8501`; `scripts/verify_production.py` proves `HEAD == image git-sha` (all 9 gates PASS). The running image's webui source is byte-identical to code-fix commit `6c0b9e6` (the report-only commit alters no source):
 
 (`docker-compose.release.yml` DNS/networks change is a **pre-existing** DF-001 concern, already present in the tree before this session — not part of the responsive-defect fix.)
 
