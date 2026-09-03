@@ -262,6 +262,14 @@ oneapi_api_key = ""
 oneapi_base_url = ""
 oneapi_model_name = ""
 
+# Custom OpenAI-Compatible provider. Configure a self-hosted or third-party
+# OpenAI-compatible endpoint (vLLM, LocalAI, LiteLLM proxy, OpenRouter, etc.).
+# The API Key is sent as a Bearer token to {base_url}/chat/completions.
+custom_openai_compatible_name = ""
+custom_openai_compatible_api_key = ""
+custom_openai_compatible_base_url = ""
+custom_openai_compatible_model_name = ""
+
 # LiteLLM uses provider credentials from environment variables, such as
 # OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or AWS_ACCESS_KEY_ID.
 # Model formats: openai/gpt-4o, anthropic/claude-sonnet-4, ollama/llama3.

@@ -333,6 +333,7 @@ class TestLiteLLMProvider(unittest.TestCase):
                 "evolink",
                 "ollama",
                 "oneapi",
+                "custom_openai_compatible",
                 "litellm",
                 "groq",
                 "pollinations",
@@ -466,6 +467,12 @@ class TestLiteLLMProvider(unittest.TestCase):
 
         for provider in LLM_PROVIDER_REGISTRY:
             if provider.requires_api_key:
+                # The generic Custom OpenAI-Compatible provider is user-supplied
+                # (arbitrary base URL + bearer token); it has no canonical key
+                # issuing page and its tips template does not reference
+                # {api_key_url}. Keep this guardrail for every concrete provider.
+                if provider.provider_id == "custom_openai_compatible":
+                    continue
                 api_key_url = provider.effective_api_key_url()
                 self.assertTrue(api_key_url, provider.provider_id)
                 self.assertTrue(

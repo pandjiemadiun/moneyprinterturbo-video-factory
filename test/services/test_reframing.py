@@ -61,26 +61,28 @@ class TestReframeLandscapeToPortrait:
         # Reframe to portrait
         success = _reframe_landscape_to_portrait(input_path, output_path, 1080, 1920)
 
-        if success:
-            assert os.path.exists(output_path)
-            assert os.path.getsize(output_path) > 0
+        # Regression for the missing source-dimension probe: a valid landscape
+        # input MUST reframe to portrait. Before the fix the function raised
+        # NameError(src_height) -> returned False -> this test silently skipped.
+        assert success, "landscape->portrait reframe unexpectedly returned False"
 
-            # Verify dimensions with ffprobe
-            probe_cmd = [
-                "ffprobe", "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=width,height",
-                "-of", "csv=p=0",
-                output_path,
-            ]
-            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
-            if probe_result.returncode == 0:
-                parts = probe_result.stdout.strip().split(",")
-                width, height = int(parts[0]), int(parts[1])
-                assert width == 1080
-                assert height == 1920
-        else:
-            pytest.skip("Reframing not supported in this environment")
+        assert os.path.exists(output_path)
+        assert os.path.getsize(output_path) > 0
+
+        # Verify dimensions with ffprobe
+        probe_cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+            output_path,
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        if probe_result.returncode == 0:
+            parts = probe_result.stdout.strip().split(",")
+            width, height = int(parts[0]), int(parts[1])
+            assert width == 1080
+            assert height == 1920
 
 
 class TestNormalizeMaterialToPortrait:
