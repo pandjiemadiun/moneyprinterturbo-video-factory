@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from webui.nav_shell import render_nav_shell
 
 from app.models.llm_provider import get_llm_provider, LLM_PROVIDER_REGISTRY, DEFAULT_LLM_PROVIDER_ID
+from app.services.llm_discovery import discover_models
 
 from webui.shared import (
     tr, get_all_fonts, get_all_songs, stable_selectbox, stable_segmented_control,
@@ -162,6 +163,13 @@ def _render_llm_settings():
                 with llm_helper:
                     st.info(tips)
 
+            if llm_provider == "custom_openai_compatible":
+                provider_custom_name = st.text_input(
+                    tr("Provider Name"), value=config.app.get(llm_provider_spec.config_key("name"), ""),
+                    key=f"{llm_provider}_provider_name_input",
+                )
+                _set_runtime_config("app", llm_provider_spec.config_key("name"), provider_custom_name)
+
             st_llm_api_key = llm_api_key
             if llm_provider_spec.show_api_key:
                 st_llm_api_key = st.text_input(tr("API Key"), value=llm_api_key, type="password", key=f"{llm_provider}_api_key_input")
@@ -189,6 +197,10 @@ def _render_llm_settings():
                         st.caption(tr("Groq Model List Load Failed"))
                     else:
                         st.caption(tr("Groq API Key Required for Model List"))
+            elif llm_provider == "custom_openai_compatible":
+                st_llm_model_name = _render_custom_openai_compatible_model(
+                    llm_provider_spec, st_llm_api_key, st_llm_base_url, llm_default_base_url, llm_model_name,
+                )
             else:
                 st_llm_model_name = st.text_input(tr("Model Name"), value=llm_model_name, key=f"{llm_provider}_model_name_input")
 
@@ -222,6 +234,96 @@ def _render_llm_settings():
                         else:
                             connection_error = format_llm_connection_error(llm_provider, st_llm_base_url, connection_error)
                             st.error(tr("LLM Connection Test Failed").format(error=connection_error))
+
+
+def _render_discovery_error(error_category, error_message):
+    """Render a categorized, actionable discovery error (never a false success)."""
+    if error_category == "auth":
+        st.error(tr("Authentication Failed"))
+    elif error_category == "network":
+        st.error(tr("Connection Failed"))
+    elif error_category in ("unsupported", "empty"):
+        st.info(tr("Model Discovery Unsupported"))
+    elif error_category == "malformed":
+        st.warning(tr("Invalid Provider Response"))
+    else:
+        st.warning(tr("Discovery Failed"))
+    if error_message:
+        st.caption(error_message)
+
+
+def _render_custom_openai_compatible_model(llm_provider_spec, llm_api_key, llm_base_url, llm_default_base_url, llm_model_name):
+    """Hybrid model selection for the Custom OpenAI-Compatible provider.
+
+    Contract (Phase 16 task spec):
+
+    * "Test & Discover Models" issues ``GET {base_url}/models`` with a Bearer
+      token. ``discover_models`` (backend, in ``app.services.llm_discovery``)
+      never logs or echoes the API key, and never produces ``...//models``.
+    * Success  -> discovered IDs populate a dropdown; the selected ID is saved
+      verbatim as the model configuration value.
+    * Any failure (404 / unsupported / malformed / empty / network / auth /
+      invalid_url / unknown) -> the UI shows a *categorized* message and STILL
+      exposes a manual "Model Name" text input. 401/403 auth failures are shown
+      distinctly and never claimed as a successful connection.
+    * Discovery state is keyed by Base URL so stale results are invalidated
+      whenever the Base URL changes.
+    """
+    provider_id = llm_provider_spec.provider_id
+    discover_state_key = f"{provider_id}_discover_state"
+    discover_state = st.session_state.setdefault(
+        discover_state_key,
+        {"base_url": "", "status": "idle", "model_ids": (), "error_category": "", "error_message": ""},
+    )
+
+    effective_base_url = llm_base_url or llm_default_base_url
+    identity = _normalize_provider_override(effective_base_url, llm_default_base_url)
+    # Invalidate stale discovery when the Base URL changes.
+    if discover_state.get("base_url") != identity:
+        discover_state.update(
+            base_url=identity, status="idle", model_ids=(), error_category="", error_message=""
+        )
+
+    if st.button(
+        tr("Test & Discover Models"),
+        key=f"{provider_id}_discover_button",
+        use_container_width=True,
+        type="secondary",
+    ):
+        with st.spinner(tr("Discovering Models")):
+            result = discover_models(base_url=effective_base_url, api_key=llm_api_key or "")
+        if result.ok:
+            discover_state.update(
+                status="success", model_ids=result.model_ids, error_category="", error_message=""
+            )
+            st.success(tr("Custom Discovery Successful"))
+        else:
+            discover_state.update(
+                status="error", model_ids=(),
+                error_category=result.error_category, error_message=result.error_message,
+            )
+        st.rerun()
+
+    status = discover_state.get("status", "idle")
+    if status == "success" and discover_state.get("model_ids"):
+        options = list(discover_state["model_ids"])
+        selected_index = options.index(llm_model_name) if llm_model_name in options else 0
+        st_llm_model_name = st.selectbox(
+            tr("Model Name"), options=options, index=selected_index,
+            key=f"{provider_id}_model_select",
+        )
+        st.caption(tr("Custom Models Discovered").format(count=len(options)))
+    else:
+        if status == "error":
+            _render_discovery_error(discover_state.get("error_category", ""), discover_state.get("error_message", ""))
+        else:
+            st.caption(tr("Custom Model Discovery Caption"))
+        st_llm_model_name = st.text_input(
+            tr("Model Name"), value=llm_model_name,
+            key=f"{provider_id}_model_name_manual_input",
+        )
+        st.caption(tr("Custom Model Discovery Unavailable"))
+    return st_llm_model_name
 
 
 def _render_material_api_settings():

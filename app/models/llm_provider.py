@@ -377,6 +377,21 @@ LLM_PROVIDER_REGISTRY = (
         "OneAPI",
         api_key_url="https://github.com/songquanpeng/one-api",
     ),
+    # Generic OpenAI-compatible provider with hybrid model discovery
+    # (auto-discovery via GET {base_url}/models + manual fallback). Chat is
+    # served by the default "openai_compatible" adapter -- no dedicated
+    # adapter code is required for new providers of this family.
+    LLMProviderSpec(
+        "custom_openai_compatible",
+        "Custom OpenAI-Compatible",
+        default_model="",
+        default_base_url="",
+        requires_api_key=True,
+        requires_model_name=True,
+        requires_base_url=True,
+        show_api_key=True,
+        show_base_url=True,
+    ),
     LLMProviderSpec(
         "litellm",
         "LiteLLM",

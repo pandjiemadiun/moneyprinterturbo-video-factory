@@ -791,6 +791,17 @@ div[data-testid="stContainer"][style*="border"] {
         flex-wrap: wrap !important;      /* let the two columns drop onto separate lines */
         align-items: flex-start !important;
     }
+
+    /* Touch targets -- Phase 15H mobile contract mandates 44px minimum. Streamlit
+       renders stBaseButton-secondary at ~37px, so the two primary LLM action
+       buttons are bumped to 44px on narrow viewports: the custom provider's
+       "Test & Discover Models" and the shared "Test LLM Connection". Scoped to
+       the LLM st-keys so the global nav header / task-card rules are untouched. */
+    div[class*="st-key-custom_openai_compatible_discover_button"] button[data-testid="stBaseButton-secondary"],
+    div[class*="st-key-test_llm_connection_button"] button[data-testid="stBaseButton-secondary"] {
+        min-height: 44px !important;
+        height: auto !important;
+    }
 }
 
 /* ── Settings tab strip — mobile scroll affordance ──────────────────────────

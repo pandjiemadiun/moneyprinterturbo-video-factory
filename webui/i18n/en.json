@@ -464,6 +464,21 @@
         "Delete Failed": "Delete failed: {error}",
         "Delete Error": "Error deleting video: {error}",
         "Confirm Delete": "Confirm Delete",
-        "Cancel": "Cancel"
+        "Cancel": "Cancel",
+        "Provider Name": "Provider Name",
+        "Test & Discover Models": "Test & Discover Models",
+        "Discovering Models": "Discovering models\u2026",
+        "Custom Discovery Successful": "\u2713 Connection successful",
+        "Custom Models Discovered": "{count} models discovered",
+        "Authentication Failed": "Authentication failed",
+        "Connection Failed": "Connection failed",
+        "Model Discovery Unsupported": "Model discovery unsupported",
+        "Invalid Provider Response": "Invalid provider response",
+        "Discovery Failed": "Discovery failed",
+        "Custom Model Discovery Caption": "Click 'Test & Discover Models' to load available models, or enter a model ID manually.",
+        "Custom Model Discovery Unavailable": "Automatic model discovery is unavailable for this provider. You can enter the model ID manually.",
+        "llm_provider_label.custom_openai_compatible": "Custom OpenAI-Compatible",
+        "llm_provider_authentication_error.custom_openai_compatible": "Authentication failed. Verify the API Key and Base URL: {base_url} ({error})",
+        "llm_provider_tips.custom_openai_compatible": "##### Custom OpenAI-Compatible Configuration\n- **Provider Name**: a friendly label for this configuration (not used for API access)\n- **Base Url**: the OpenAI-compatible base URL of your provider, including any path prefix such as /openai/v1\n- **API Key**: the bearer token issued by your provider\n- **Model**: press 'Test & Discover Models' to load available models, or enter a model ID manually when discovery is unsupported\n\nCompatible providers include Groq, OpenRouter, LiteLLM proxies, vLLM, LocalAI and other OpenAI-compatible APIs."
     }
 }
