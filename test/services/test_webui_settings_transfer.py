@@ -1,4 +1,3 @@
-import ast
 import json
 from pathlib import Path
 
@@ -6,6 +5,8 @@ import pytest
 
 from app.models.llm_provider import LLM_PROVIDER_REGISTRY, get_llm_provider
 from app.models.schema import VideoParams
+
+import webui.shared as _shared
 
 
 ROOT_DIR = Path(__file__).parent.parent.parent
@@ -53,37 +54,34 @@ def _record_runtime_config(section_name, key, value):
     RUNTIME_CONFIG_UPDATES.append((section_name, key, value))
 
 
+# Phase 14.5 (commit 2800727) moved the key-backup / settings-preset helpers
+# and their constants out of webui/Main.py into webui/shared.py, and (for eight
+# of them) re-exposed ``_*`` aliases. Four helpers were renamed (the leading
+# underscore was dropped in shared.py), so map the historical test names to
+# their current location. shared.py has no Streamlit page-rendering side
+# effects on import, so it is safe to import directly (unlike Main.py).
+_HELPER_NAME_MAP = {
+    "_is_credential_config_key": "is_credential_config_key",
+    "_is_backup_config_key": "is_backup_config_key",
+    "_credential_widget_state_keys": "credential_widget_state_keys",
+    "_normalize_backup_value": "normalize_backup_value",
+}
+
+
 def _load_settings_transfer_helpers():
-    """
-    从 WebUI 入口中隔离加载导出导入相关的纯函数。
+    """Load key-backup / settings-preset helpers from webui.shared.
 
-    与任务历史测试相同，直接导入 Main.py 会执行整套页面渲染。这里只编译目标
-    常量和函数，既验证真实实现，也不需要为测试拆出额外的生产模块。
+    The previous implementation parsed webui/Main.py with ``ast``, but Phase
+    14.5 moved these helpers into ``webui/shared.py`` (``Main.py`` no longer
+    defines them), which made ``ast`` miss them -> ``KeyError`` at collection.
+    Import them directly from the module they actually live in.
     """
-    tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
-    selected_nodes = []
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id in SETTINGS_TRANSFER_CONSTANTS
-            for target in node.targets
-        ):
-            selected_nodes.append(node)
-        elif (
-            isinstance(node, ast.FunctionDef) and node.name in SETTINGS_TRANSFER_HELPERS
-        ):
-            selected_nodes.append(node)
-
     namespace = {
-        "json": json,
-        "VideoParams": VideoParams,
-        "LLM_PROVIDER_REGISTRY": LLM_PROVIDER_REGISTRY,
-        # _apply_key_backup 写配置并清理控件状态，两者都由测试替身记录，
-        # 这样可以验证真实实现而不需要启动 Streamlit 会话。
         "st": _FakeStreamlit(),
         "_set_runtime_config": _record_runtime_config,
     }
-    module = ast.fix_missing_locations(ast.Module(body=selected_nodes, type_ignores=[]))
-    exec(compile(module, str(WEBUI_MAIN), "exec"), namespace)
+    for name in SETTINGS_TRANSFER_HELPERS | SETTINGS_TRANSFER_CONSTANTS:
+        namespace[name] = getattr(_shared, _HELPER_NAME_MAP.get(name, name))
     return namespace
 
 
@@ -102,6 +100,16 @@ SETTINGS_PRESET_SCHEMA = NAMESPACE["SETTINGS_PRESET_SCHEMA"]
 SETTINGS_PRESET_VERSION = NAMESPACE["SETTINGS_PRESET_VERSION"]
 KEY_BACKUP_SCHEMA = NAMESPACE["KEY_BACKUP_SCHEMA"]
 KEY_BACKUP_VERSION = NAMESPACE["KEY_BACKUP_VERSION"]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_shared_streamlit_and_runtime_config(monkeypatch):
+    """Route shared.st / shared._set_runtime_config through the test fakes so
+    apply_key_backup runs against _FakeStreamlit / _record_runtime_config
+    instead of real Streamlit state or config.toml writes."""
+    RUNTIME_CONFIG_UPDATES.clear()
+    monkeypatch.setattr(_shared, "st", FAKE_STREAMLIT)
+    monkeypatch.setattr(_shared, "_set_runtime_config", _record_runtime_config)
 
 
 def _encode(payload):
