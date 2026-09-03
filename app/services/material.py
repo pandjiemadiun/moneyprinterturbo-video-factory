@@ -377,6 +377,12 @@ def _reframe_landscape_to_portrait(
 
         ffmpeg_binary = utils.get_ffmpeg_binary()
 
+        # Probe the source video dimensions for the scale-to-cover + center-crop
+        # math below. This was previously omitted, leaving `src_width`/`src_height`
+        # undefined -> NameError on the first line -> reframe always failed.
+        with VideoFileClip(input_path) as clip:
+            src_width, src_height = clip.size
+
         # Calculate dimensions for scale-to-cover + center crop
         # Scale so source height matches target portrait height
         # This causes horizontal overflow that we crop

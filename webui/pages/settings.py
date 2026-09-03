@@ -12,6 +12,7 @@ import json
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+from loguru import logger
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 

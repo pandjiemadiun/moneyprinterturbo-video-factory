@@ -1471,6 +1471,8 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
 
         valid_materials.append(material)
 
+    return valid_materials
+
 
 def _extract_thumbnail_frame(
     video_path: str,
@@ -1585,5 +1587,3 @@ def generate_thumbnails(
         f"generated {len(thumbnails)} thumbnail(s) in {output_dir}"
     )
     return thumbnails
-
-    return valid_materials
