@@ -121,6 +121,13 @@ def _open_llm_settings(page, base_url):
     page.eval_on_selector_all('[data-testid="stTabs"] [role="tab"]',
         "(els)=>els.find(e=>e.textContent.trim().includes('AI & Script'))?.click()")
     page.wait_for_selector('div[class*="st-key-llm_form_help_row"]', timeout=20000)
+    # Cold-start race: the form/help row may exist while the LLM provider
+    # selectbox label ('Kimi API Platform') is still being painted. Wait for
+    # the actual label text to be present so the geometry measurement is valid.
+    page.wait_for_function(
+        "()=>Array.from(document.querySelectorAll('[data-testid=\"stWidgetLabel\"]'))"
+        ".some(l=>(l.textContent||'').trim()==='Kimi API Platform')",
+        timeout=25000)
 
 
 def _llm_form_geometry(page):
