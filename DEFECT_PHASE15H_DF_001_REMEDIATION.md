@@ -288,17 +288,24 @@ Added two test files:
 
   These tests are **proven meaningful**: they FAIL on the original broken state (form=66/help=206, no fade) and PASS on the fixed state (288/288 stacked, 28px fade). Verified by running them against 8501 LIVE *before* and *after* the deploy.
 
+  **Cold-start hardening:** the geometry test originally flaked on the *immediately*-redeployed container (Streamlit first-render > 20s; the selectbox label paints after the form row). `_open_llm_settings` now retries the navigation (`domcontentloaded` instead of `networkidle`) and `wait_for_function` polls for the `"Kimi API Platform"` label text before measuring — so the regression survives an immediate post-deploy run. This was re-committed + rebuilt into the canonical image (see §6.5).
+
 Result: `47 passed in 20.12s` (41 navigation + 3 geometry + 3 contract). Zero regressions vs pristine HEAD (the 24 `test_webui_bgm.py` / `test_webui_task.py` failures are pre-existing and identical on HEAD — they require API/network and are unrelated to this change; `test_webui_llm_settings.py::test_kimi_platform_selection_keeps_endpoint_configuration_consistent` is a pre-existing spec failure: AppTest cannot resolve the `moonshot_service_endpoint_select` widget key in headless mode — also unrelated to CSS).
 
-### 6.5 Production deploy verification (live `goldtrader.website` / 8501)
+### 6.5 Production deploy verification — CANONICAL IMMUTABLE IMAGE (live `goldtrader.website` / 8501)
 
-The fix was deployed to **live production 8501** via targeted file copy + container restart (NOT a rebuild — preserves the production storage/config; see §7):
+Following the canonical deploy contract (commit → rebuild immutable image from the canonical build context `/root/moneyprinterturbo-video-factory` ONLY → run with the existing production runtime: no volume binds, default `bridge`, `--restart unless-stopped`, baked CMD `streamlit run ./webui/Main.py`), the fix is now **baked into the canonical image that production actually runs** (not a runtime patch).
 
-- `docker cp webui/styles.css webui/pages/settings.py → moneyprinterturbo-webui:/MoneyPrinterTurbo/webui/`
-- `docker restart moneyprinterturbo-webui`
-- **BEFORE (prod 8501):** 320px form=257, help=15, overflow=True, tab afterW=0, hasFade=false.
-- **AFTER (prod 8501):** 320px form=288=help=parent, overflow=False; `css_check.py` confirms served CSS = corrected rule (starver tokens gone); tab strip `afterW=28, hasFade=true, snap="x mandatory", 6/6 tabs, System fully visible`.
-- Production identity re-verified post-restart: still `git-sha=b0de54c`; `Main.py` runtime sha unchanged; domain still `127.0.0.1:8501`.
+- **Commit:** fix + tests + reports committed → `HEAD = 6c0b9e6b8fc40ee6e5cce0160f29a14327fc71a8`.
+- **Rebuild:** `docker build --build-arg GIT_SHA=6c0b9e6… --build-arg BUILD_PHASE=15H-final -t mpt-webui:6c0b9e6 …` → image `mpt-webui:6c0b9e6` with `LABEL git-sha=6c0b9e6, repo=moneyprinterturbo-video-factory, canonical-webui=webui/Main.py`.
+- **Redeploy:** `docker stop/rm moneyprinterturbo-webui && docker run --name moneyprinterturbo-webui --restart unless-stopped -p 127.0.0.1:8501:8501 mpt-webui:6c0b9e6`. Identical runtime to the prior 8501 (no mounts, bridge, `unless-stopped`) — **behavior-preserving**; only the baked webui (CSS + settings wrapper) differs.
+- **`verify_production.py` — ALL 9 HARD GATES PASS:** clean working tree ✓, `HEAD 6c0b9e6 == image git-sha 6c0b9e6` ✓, runtime `Main.py` == committed ✓, exactly one listener on 8501 / Factory 8000 closed / API 8080 present ✓, nginx `goldtrader.website → 127.0.0.1:8501` + factory vhost disabled ✓, no Factory-UI container ✓. **VERDICT: PASS — production identity chain proven.**
+- **BEFORE (prod 8501, canonical 15H-b0de54c bake):** 320px form=257, help=15, `overflow: True`, tab `afterW=0`, `hasFade=false` (broken in-progress fix).
+- **AFTER (prod 8501, canonical mpt-webui:6c0b9e6):** 320px form=358=help=parent (stacked at x=16), `overflow: False`; `css_check.py` on live 8501 confirms served CSS has `max-width: 639px` + `st-key-llm_form_help_row` + `flex:1 1 100%` + tab `::after` 28px fade — and the OLD broken tokens (`lastchild)::after`, `:has(stInfo)`) are **absent**.
+- **Cold-start regression (run immediately on the freshly-redeployed prod):** `test_webui_responsive_geometry.py` → **3 passed** (LLM form stacks full-width on mobile, stays side-by-side on desktop 768/1024/1365, tab strip fade + all 6 tabs reachable).
+- **6-page collateral scan on prod 8501 (Overview/Discover/Review/Create/Library/Settings × 320+412):** **0 defects** (no horizontal overflow on any page; the scoped CSS neither regressed siblings nor left the LLM form/tab strip broken).
+
+> Note on an intermediate step: an **interim** hot-patch (`docker cp` styles.css+settings.py into the running 8501) was applied first to get the defect live instantly and to gather before/after geometry on the *real* production domain. It was **superseded** by the canonical immutable-image deploy above. The final running container is `mpt-webui:6c0b9e6` (baked from committed source).
 
 ---
 
@@ -312,9 +319,9 @@ Host `/opt/MoneyPrinterTurbo` (the production data volume):
 | `storage/` size | 7.3G | 7.3G | ✓ unchanged |
 | `config.toml` sha256 | `a47f047f9f7543cd79ca0cb0dd2e901ce796078b31c2e45a6cb3dfbda67a14eb` | same | ✓ unchanged |
 | `tasks.db` | 540672B, Sep 1 (pre-existing) | unchanged | ✓ no schema changes |
-| container `/MoneyPrinterTurbo/config.toml` sha | (baked `ac467655…`) | unchanged | ✓ untouched by deploy |
+| container `/MoneyPrinterTurbo/config.toml` sha | baked repo `config.toml` `3a5c66d2…` (gitignored fallback) | unchanged | ✓ the canonical build context is the **repo only** (per AGENTS.md) — `/opt/MoneyPrinterTurbo` is NOT in the build context, so the prod data volume is never baked; the prior broken bake's `ac467655…` is no longer present |
 
-**No jobs created by testing** (only `GET /render_*`, in-process AppTest, Playwright reads, geometry probes). The deploy wrote **only** `webui/styles.css` + `webui/pages/settings.py` inside the 8501 container — `config.toml`, `storage/`, and `tasks.db` were not touched.
+**No jobs created by testing** (only `GET /render_*`, in-process AppTest, Playwright reads, geometry probes). The canonical image rebuild's build context is the repo (`/root/moneyprinterturbo-video-factory`) — `/opt/MoneyPrinterTurbo` is excluded, so the 473 mp4 / 7.3G / `config.toml` (`a47f047f…`) data volume on the host was **not read, not copied, not mutated** by the build or the redeploy. The deploy wrote **only** `webui/styles.css` + `webui/pages/settings.py` (plus the test/report deliverables) into the canonical source; the production storage/config were untouched.
 
 ---
 
@@ -345,12 +352,20 @@ The prior Phase 15H passed because it trusted source/narrative and a single scre
 | file | change |
 |------|--------|
 | `webui/pages/settings.py` | (pre-existing wrapper from prior session) `with st.container(key="llm_form_help_row"):` around `st.columns([0.9, 1.1])` — kept as the stable scoping hook; NO widget keys changed. |
-| `webui/styles.css` | `+54` lines: scoped `@media (max-width:639px)` LLM-form stack override (769–791) + corrected tab `::after` fade + `scroll-snap` (551–560, 801–822) + explanatory comments. Global nav starver (119–137) intentionally **untouched** (still needed by the nav header). Net 777 → 826 lines. |
+| `webui/styles.css` | scoped `@media (max-width:639px)` LLM-form stack override (769–791) + corrected tab `::after` 28px gradient fade + `scroll-snap` (551–560, 801–822) + explanatory comments. Global nav starver (119–137) intentionally **untouched** (still needed by the nav header). Net 777 → 826 lines. |
 | `test/services/test_webui_responsive_contract.py` | NEW — 3 AST/structural guards. |
-| `test/services/test_webui_responsive_geometry.py` | NEW — 3 Playwright geometry tests (default target prod 8501). |
-| `docker-compose.release.yml` | (pre-existing, unrelated DF-001 DNS/networks fix — NOT part of this defect). |
+| `test/services/test_webui_responsive_geometry.py` | NEW — 3 Playwright geometry tests (default target prod 8501), hardened for Streamlit cold-start (retry navigation + `wait_for_function` for the `Kimi API Platform` label paint). |
+| `DEFECT_PHASE15H_DF_001_REMEDIATION.md` | NEW — this report. |
 
-Untracked report docs (this session): `DEFECT_PHASE15H_DF_001_REMEDIATION.md` (this file).
+**Final commit history (on `main`):**
+```
+6c0b9e6 Phase 15H: wait for LLM selectbox label paint before geometry assertion (cold-start race)
+c318fd3 Phase 15H: harden geometry test for Streamlit cold-start (retry nav, domcontentloaded, 45s tablist wait)
+431e444 Phase 15H DF-001: fix Settings mobile LLM form starvation + tab strip discoverability
+```
+**Canonical production image:** `mpt-webui:6c0b9e6` (`LABEL git-sha=6c0b9e6, repo=moneyprinterturbo-video-factory, canonical-webui=webui/Main.py`) — **baked from committed source**, running on `goldtrader.website:8501`.
+
+(`docker-compose.release.yml` DNS/networks change is a **pre-existing** DF-001 concern, already present in the tree before this session — not part of the responsive-defect fix.)
 
 ---
 
