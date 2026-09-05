@@ -65,8 +65,11 @@ def submit_generation(
     so subsequent UI polling queries the correct task).
     """
     task_params = params.model_copy(deep=True)
+    payload = task_params.model_dump()
+    if voice_preview is not None:
+        payload["voice_preview"] = voice_preview
     try:
-        result = webui_api_client.api_create_task(task_params.model_dump())
+        result = webui_api_client.api_create_task(payload)
         api_task_id = result.get("task_id", task_id)
         logger.info(f"task submitted via API: task_id={api_task_id}")
         return api_task_id
