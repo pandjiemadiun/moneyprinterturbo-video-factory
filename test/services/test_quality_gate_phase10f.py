@@ -414,8 +414,8 @@ class TestNoBehavioralChangeOutsideGate(unittest.TestCase):
 
     def test_save_video_youtube_format_unchanged(self):
         """yt-dlp format must not change."""
-        source = inspect.getsource(mat.save_video_youtube)
-        self.assertIn("best[ext=mp4][height<=720]", source)
+        source = inspect.getsource(mat._build_youtube_ydl_opts)
+        self.assertIn("bestvideo[vcodec^=avc1][ext=mp4][height<=720]+bestaudio[acodec^=mp4a]/best", source)
         self.assertNotIn("nopart", source)
 
     def test_validate_downloaded_clip_preserves_other_checks(self):

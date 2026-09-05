@@ -21,8 +21,8 @@ class TestBatchUIContract(unittest.TestCase):
     """Tests for batch creation UI contract (11F.1)."""
 
     def _get_video_sources(self):
-        """Extract video_sources values from Main.py without importing Streamlit."""
-        main_py = Path(__file__).parent.parent.parent / "webui" / "Main.py"
+        """Extract video_sources values from create.py without importing Streamlit."""
+        main_py = Path(__file__).parent.parent.parent / "webui" / "pages" / "create.py"
         content = main_py.read_text()
         import re
         # Find the video_sources = [...] block by bracket matching
@@ -73,13 +73,13 @@ class TestBatchUIContract(unittest.TestCase):
         ]
         common_params = {"voice_name": "female-1", "subtitle_enabled": True}
 
-        with patch("app.services.webui_batch.webui_task") as mock_wt:
-            mock_wt.submit_generation = MagicMock()
+        with patch("app.services.webui_batch.webui_api_client.api_create_task") as mock_api:
+            mock_api.return_value = {"task_id": "test-task"}
             batch_id, task_ids = webui_batch.submit_batch(topics, common_params)
 
         self.assertIsNotNone(batch_id)
         self.assertEqual(len(task_ids), 2)
-        self.assertEqual(mock_wt.submit_generation.call_count, 2)
+        self.assertEqual(mock_api.call_count, 2)
 
     def test_batch_empty_topics_rejected(self):
         """Empty topic list should raise ValueError."""
@@ -91,7 +91,7 @@ class TestBatchMonitor(unittest.TestCase):
     """Tests for batch monitoring (11F.2)."""
 
     def test_batch_status_counts(self):
-        """Batch status should correctly derive counts from tasks."""
+        """Batch status counts tasks by state."""
         task_ids = ["t1", "t2", "t3", "t4"]
         tasks = {
             "t1": {"state": const.TASK_STATE_COMPLETE, "progress": 100},
@@ -99,8 +99,8 @@ class TestBatchMonitor(unittest.TestCase):
             "t3": {"state": const.TASK_STATE_PROCESSING, "progress": 50},
             "t4": {"state": const.TASK_STATE_FAILED, "progress": 20, "error": "fail"},
         }
-        with patch("app.services.webui_batch.sm") as mock_sm:
-            mock_sm.state.get_task.side_effect = lambda tid: tasks.get(tid)
+        with patch("app.services.webui_batch.webui_api_client.api_get_task") as mock_api:
+            mock_api.side_effect = lambda tid: tasks.get(tid)
             status = webui_batch.get_batch_status(task_ids)
 
         self.assertEqual(status["total"], 4)
@@ -116,8 +116,8 @@ class TestBatchMonitor(unittest.TestCase):
             "t1": {"state": const.TASK_STATE_COMPLETE, "progress": 100},
             "t2": {"state": const.TASK_STATE_COMPLETE, "progress": 100},
         }
-        with patch("app.services.webui_batch.sm") as mock_sm:
-            mock_sm.state.get_task.side_effect = lambda tid: tasks.get(tid)
+        with patch("app.services.webui_batch.webui_api_client.api_get_task") as mock_api:
+            mock_api.side_effect = lambda tid: tasks.get(tid)
             status = webui_batch.get_batch_status(task_ids)
 
         self.assertTrue(status["is_complete"])
@@ -167,7 +167,7 @@ class TestMobileCSS(unittest.TestCase):
         """CSS should contain mobile breakpoint rules."""
         css_path = Path(__file__).parent.parent.parent / "webui" / "styles.css"
         css_content = css_path.read_text()
-        self.assertIn("max-width: 700px", css_content)
+        self.assertIn("max-width: 768px", css_content)
         self.assertIn("max-width: 480px", css_content)
 
     def test_no_hardcoded_4column_overflow(self):
@@ -185,8 +185,8 @@ class TestProviderParity(unittest.TestCase):
     """Tests that all providers are preserved (11F.5)."""
 
     def _get_video_sources(self):
-        """Extract video_sources values from Main.py without importing Streamlit."""
-        main_py = Path(__file__).parent.parent.parent / "webui" / "Main.py"
+        """Extract video_sources values from create.py without importing Streamlit."""
+        main_py = Path(__file__).parent.parent.parent / "webui" / "pages" / "create.py"
         content = main_py.read_text()
         import re
         # Find the video_sources = [...] block by bracket matching

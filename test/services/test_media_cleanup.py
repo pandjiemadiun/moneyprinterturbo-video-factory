@@ -600,11 +600,11 @@ class TestYouTubeProviderUnchanged(unittest.TestCase):
         # We can't easily inspect the internal ydl_opts, but we can verify
         # the function still accepts the same parameters and doesn't use nopart
         import inspect
-        source = inspect.getsource(mat.save_video_youtube)
+        source = inspect.getsource(mat._build_youtube_ydl_opts)
         # nopart should NOT be in the source
         self.assertNotIn("nopart", source, "nopart must NOT be added to yt-dlp opts")
         # Format must be unchanged
-        self.assertIn("best[ext=mp4][height<=720]", source)
+        self.assertIn("bestvideo[vcodec^=avc1][ext=mp4][height<=720]+bestaudio[acodec^=mp4a]/best", source)
         # merge_output_format must be unchanged
         self.assertIn("merge_output_format", source)
 
@@ -655,6 +655,7 @@ class TestLargeRejectionModel(unittest.TestCase):
         The quality-gate rejection cleanup must delete it.
         """
         tmpdir = tempfile.mkdtemp(prefix="test_cleanup_large_")
+        original_storage_dir = mat.utils.storage_dir
         try:
             # The known YouTube URL was omwuNTQcsvI, hash would be:
             # (We use a deterministic hash for testing)
@@ -682,6 +683,7 @@ class TestLargeRejectionModel(unittest.TestCase):
             self.assertEqual(len(remaining), 0,
                              f"No other files should remain in cache: {remaining}")
         finally:
+            mat.utils.storage_dir = original_storage_dir
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 

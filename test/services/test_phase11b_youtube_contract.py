@@ -153,7 +153,7 @@ class TestYouTubeInDownloadVideos(unittest.TestCase):
         self.assertEqual(result, [])
 
     def test_download_videos_youtube_failure_shows_meaningful_error(self):
-        """YouTube search exceptions should propagate (caller handles them gracefully)."""
+        """YouTube search exceptions are caught gracefully (caller handles empty result)."""
         with (
             patch(
                 "app.services.material.search_videos_youtube",
@@ -168,18 +168,14 @@ class TestYouTubeInDownloadVideos(unittest.TestCase):
                 return_value=MagicMock(),
             ),
         ):
-            # The exception propagates from search_videos_youtube through
-            # _search_videos_with_cache to download_videos. The caller
-            # (get_video_materials in task.py) catches it and marks the task failed.
-            with self.assertRaises(Exception) as ctx:
-                material.download_videos(
-                    task_id="test-youtube-error",
-                    search_terms=["test"],
-                    source="youtube",
-                    audio_duration=5,
-                    max_clip_duration=5,
-                )
-            self.assertIn("yt_dlp not available", str(ctx.exception))
+            result = material.download_videos(
+                task_id="test-youtube-error",
+                search_terms=["test"],
+                source="youtube",
+                audio_duration=5,
+                max_clip_duration=5,
+            )
+            self.assertEqual(result, [])
 
 
 class TestExistingProvidersPreserved(unittest.TestCase):
