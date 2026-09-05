@@ -34,7 +34,7 @@ VISUAL_CONCEPTS_ID = {
     "terpikirkan": ["thinking about", "reflection", "person thinking"],
     "kesepian": ["lonely", "isolated", "alone person", "lonely silhouette"],
     "status sosial": ["social status", "status anxiety", "status symbol"],
-    "mengapa": ["why", "reason", "explanation", "person curious"],
+    "mengapa": ["why", "reason", "explanation", "person curious", "because"],
     "ingatan": ["memory", "remembering", "past moment"],
     
     # Money/Business Concepts
@@ -48,7 +48,6 @@ VISUAL_CONCEPTS_ID = {
     
     # Productivity Concepts
     "kebiasaan": ["habit", "routine", "daily habit", "person doing"],
-    "mengapa": ["why", "reason", "because", "explanation"],
     "pemalas": ["lazy", "lazy person", "slothful"],
     "gangguan": ["distraction", "interruption", "stopped by"],
     "pagi": ["morning", "early morning", "dawn"],
