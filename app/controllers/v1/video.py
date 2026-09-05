@@ -1,4 +1,5 @@
 import glob
+import json
 import os
 import pathlib
 import shutil
@@ -182,30 +183,45 @@ def _parse_byte_range(
 
 
 @router.post("/videos", response_model=TaskResponse, summary="Generate a short video")
-def create_video(
+async def create_video(
     background_tasks: BackgroundTasks, request: Request, body: TaskVideoRequest
 ):
-    return create_task(request, body, stop_at="video")
+    voice_preview = _extract_voice_preview(request)
+    return create_task(request, body, stop_at="video", voice_preview=voice_preview)
 
 
 @router.post("/subtitle", response_model=TaskResponse, summary="Generate subtitle only")
-def create_subtitle(
+async def create_subtitle(
     background_tasks: BackgroundTasks, request: Request, body: SubtitleRequest
 ):
-    return create_task(request, body, stop_at="subtitle")
+    voice_preview = _extract_voice_preview(request)
+    return create_task(request, body, stop_at="subtitle", voice_preview=voice_preview)
 
 
 @router.post("/audio", response_model=TaskResponse, summary="Generate audio only")
-def create_audio(
+async def create_audio(
     background_tasks: BackgroundTasks, request: Request, body: AudioRequest
 ):
-    return create_task(request, body, stop_at="audio")
+    voice_preview = _extract_voice_preview(request)
+    return create_task(request, body, stop_at="audio", voice_preview=voice_preview)
+
+
+def _extract_voice_preview(request: Request) -> dict | None:
+    try:
+        raw_body = json.loads(request.body())
+        preview = raw_body.get("voice_preview")
+        if preview is not None and not isinstance(preview, dict):
+            return None
+        return preview
+    except Exception:
+        return None
 
 
 def create_task(
     request: Request,
     body: Union[TaskVideoRequest, SubtitleRequest, AudioRequest],
     stop_at: str,
+    voice_preview: dict | None = None,
 ):
     task_id = utils.get_uuid()
     request_id = base.get_task_id(request)
@@ -223,7 +239,7 @@ def create_task(
         )
         try:
             task_manager.add_task(
-                tm.start, task_id=task_id, params=body, stop_at=stop_at
+                tm.start, task_id=task_id, params=body, stop_at=stop_at, voice_preview=voice_preview
             )
         except Exception:
             # 状态记录在调度前创建，默认标记为 processing。如果调度器没能

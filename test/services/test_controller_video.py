@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import shutil
 import tempfile
@@ -136,13 +137,78 @@ class TestVideoControllerTasks(unittest.TestCase):
         self.assertEqual(response["status"], 200)
         self.assertEqual(response["data"]["task_id"], "task-123")
         self.assertEqual(response["data"]["request_id"], "request-123")
-        update_task.assert_called_once_with("task-123")
+        update_task.assert_called_once_with("task-123", state=0, params={"video_subject": "Coffee"})
         add_task.assert_called_once_with(
             video_controller.tm.start,
             task_id="task-123",
             params=body,
             stop_at="audio",
+            voice_preview=None,
         )
+
+    def test_create_task_forwards_voice_preview_to_pipeline(self):
+        """创建任务时应把 voice_preview 从原始请求体传递给流水线。"""
+        body = MagicMock()
+        body.model_dump.return_value = {"video_subject": "Coffee"}
+        voice_preview = {"audio_file": "/tmp/preview.mp3", "duration": 5.0}
+
+        with (
+            patch.object(video_controller.utils, "get_uuid", return_value="task-123"),
+            patch.object(video_controller.sm.state, "update_task") as update_task,
+            patch.object(video_controller.task_manager, "add_task") as add_task,
+        ):
+            response = video_controller.create_task(
+                self._request(), body, stop_at="video", voice_preview=voice_preview
+            )
+
+        self.assertEqual(response["status"], 200)
+        add_task.assert_called_once_with(
+            video_controller.tm.start,
+            task_id="task-123",
+            params=body,
+            stop_at="video",
+            voice_preview=voice_preview,
+        )
+
+    def test_extract_voice_preview_reads_raw_request_body(self):
+        """_extract_voice_preview 应从原始请求体提取 voice_preview 字段。"""
+        preview = {"audio_file": "/tmp/test.mp3", "duration": 3.0}
+        raw_body = json.dumps({"video_subject": "test", "voice_preview": preview})
+        request = SimpleNamespace(
+            body=lambda: raw_body.encode() if callable(raw_body.encode) else raw_body.encode()
+        )
+
+        result = video_controller._extract_voice_preview(request)
+        self.assertEqual(result, preview)
+
+    def test_extract_voice_preview_returns_none_when_missing(self):
+        """voice_preview 缺失时应返回 None。"""
+        raw_body = json.dumps({"video_subject": "test"})
+        request = SimpleNamespace(
+            body=lambda: raw_body.encode() if callable(raw_body.encode) else raw_body.encode()
+        )
+
+        result = video_controller._extract_voice_preview(request)
+        self.assertIsNone(result)
+
+    def test_extract_voice_preview_rejects_non_dict(self):
+        """voice_preview 非字典时应返回 None。"""
+        raw_body = json.dumps({"video_subject": "test", "voice_preview": "invalid"})
+        request = SimpleNamespace(
+            body=lambda: raw_body.encode() if callable(raw_body.encode) else raw_body.encode()
+        )
+
+        result = video_controller._extract_voice_preview(request)
+        self.assertIsNone(result)
+
+    def test_extract_voice_preview_handles_malformed_json(self):
+        """JSON 解析失败时应返回 None。"""
+        request = SimpleNamespace(
+            body=lambda: b"not json"
+        )
+
+        result = video_controller._extract_voice_preview(request)
+        self.assertIsNone(result)
 
     def test_create_task_removes_state_when_queue_is_full(self):
         """队列已满时必须回滚刚创建的状态，并向调用方返回 429。"""
@@ -234,7 +300,7 @@ class TestVideoControllerTasks(unittest.TestCase):
 
             self.assertEqual(
                 response["data"]["videos"],
-                [f"/tasks/{task_id}/final-1.mp4"],
+                [video_path],
             )
             self.assertNotIn("cross_post_owner", response["data"])
             self.assertIn("cross_post_owner", sm.state.get_task(task_id))
