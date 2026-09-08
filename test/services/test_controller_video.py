@@ -154,7 +154,7 @@ class TestVideoControllerTasks(unittest.TestCase):
 
         with (
             patch.object(video_controller.utils, "get_uuid", return_value="task-123"),
-            patch.object(video_controller.sm.state, "update_task") as update_task,
+            patch.object(video_controller.sm.state, "update_task"),
             patch.object(video_controller.task_manager, "add_task") as add_task,
         ):
             response = video_controller.create_task(
