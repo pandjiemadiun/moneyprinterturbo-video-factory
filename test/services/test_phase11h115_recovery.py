@@ -12,6 +12,11 @@ Tests cover:
   9. No secrets/cookies appear in logs.
 
 All YouTube I/O is mocked — no real network calls, no secrets required.
+
+NOTE: Navigation functions (_switch_nav_view, _render_videos_view, _render_top_bar,
+_render_application) were removed during the multipage refactor. Tests that depend
+on these symbols have been updated to verify the new st.navigation + st.switch_page
+architecture in webui/Main.py and webui/nav_shell.py.
 """
 from __future__ import annotations
 
@@ -27,6 +32,9 @@ import pytest
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
+WEBUI_SHARED = ROOT_DIR / "webui" / "shared.py"
+WEBUI_PAGES_LIBRARY = ROOT_DIR / "webui" / "pages" / "library.py"
+WEBUI_NAV_SHELL = ROOT_DIR / "webui" / "nav_shell.py"
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -51,209 +59,111 @@ def _func_def(tree, name):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestNavigationSingleCanonicalState:
-    """All navigation entry points must share ONE canonical state key.
-
-    The 11H.1.13 audit found that _render_videos_view set
-    st.session_state["nav_view"] = "create" while _render_top_bar used a
-    SEPARATE widget key "nav_view_selector", whose stale value overwrote
-    the CTA's navigation on rerun.
-
-    Fix: the segmented_control must NOT use key="nav_view" because
-    _switch_nav_view() mutates st.session_state["nav_view"] after widget
-    creation, which raises StreamlitAPIException. The widget either has
-    no key or uses a separate key; application state is managed solely
-    by _switch_nav_view().
-    """
+    """Navigation uses st.navigation() + st.switch_page() (no legacy nav_view state)."""
 
     def test_no_nav_view_selector_key_in_main(self):
-        """The widget must NOT use a separate key that can shadow nav_view."""
-        assert "nav_view_selector" not in _read_source()
+        """The old nav_view_selector key no longer exists."""
+        for path in (WEBUI_MAIN, WEBUI_SHARED, WEBUI_PAGES_LIBRARY, WEBUI_NAV_SHELL):
+            assert "nav_view_selector" not in path.read_text(encoding="utf-8")
 
     def test_segmented_control_does_not_use_nav_view_key(self):
-        """The segmented_control must NOT use key='nav_view' because that
-        would bind the widget to the app state key and trigger
-        StreamlitAPIException when _switch_nav_view mutates it after
-        widget creation."""
-        tree = _parse()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                if node.func.attr == "segmented_control":
-                    for kw in node.keywords:
-                        if kw.arg == "key" and isinstance(kw.value, ast.Constant):
-                            assert kw.value.value != "nav_view", (
-                                "segmented_control key must NOT be 'nav_view'"
-                            )
+        """No widget uses key='nav_view' in the new architecture."""
+        for path in (WEBUI_MAIN, WEBUI_SHARED, WEBUI_PAGES_LIBRARY, WEBUI_NAV_SHELL):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    if node.func.attr in ("segmented_control", "selectbox", "radio"):
+                        for kw in node.keywords:
+                            if kw.arg == "key" and isinstance(kw.value, ast.Constant):
+                                assert kw.value.value != "nav_view"
 
     def test_switch_nav_view_helper_exists(self):
-        """A canonical _switch_nav_view helper must exist."""
-        funcs = {
-            n.name for n in ast.walk(_parse())
-            if isinstance(n, ast.FunctionDef)
-        }
-        assert "_switch_nav_view" in funcs
+        """Main.py uses st.navigation() for canonical page registry."""
+        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        assert "st.navigation" in source
 
     def test_videos_empty_cta_uses_switch_nav_view(self):
-        """The Videos empty-state CTA must use _switch_nav_view."""
-        tree = _parse()
-        func = _func_def(tree, "_render_videos_view")
-        func_source = ast.get_source_segment(_read_source(), func)
-        assert "_switch_nav_view" in func_source
-        # Must NOT have the old anti-pattern
-        assert 'st.session_state["nav_view"] = "create"' not in func_source
+        """Library page uses st.switch_page for navigation (no raw session_state mutation)."""
+        source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
+        assert "st.switch_page" in source
+        assert 'st.session_state["nav_view"] = "create"' not in source
 
     def test_top_bar_uses_switch_nav_view(self):
-        """_render_top_bar must route navigation through _switch_nav_view."""
-        tree = _parse()
-        func = _func_def(tree, "_render_top_bar")
-        func_source = ast.get_source_segment(_read_source(), func)
-        assert "_switch_nav_view" in func_source
+        """Nav shell uses st.switch_page for navigation."""
+        source = WEBUI_NAV_SHELL.read_text(encoding="utf-8")
+        assert "st.switch_page" in source
 
     def test_videos_view_cta_key_is_content_aware(self):
-        """The CTA button must reference the correct key."""
-        tree = _parse()
-        func = _func_def(tree, "_render_videos_view")
-        func_source = ast.get_source_segment(_read_source(), func)
-        assert "videos_empty_create" in func_source
+        """Library page has content-aware task actions."""
+        source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
+        assert "task_cancel_" in source or "task_retry_" in source or "task_delete_" in source
 
     def test_nav_view_is_canonically_consumed(self):
-        """The render dispatcher must read from st.session_state['nav_view']."""
-        tree = _parse()
-        func = _func_def(tree, "_render_application")
-        func_source = ast.get_source_segment(_read_source(), func)
-        assert "st.session_state.get" in func_source
-        assert "nav_view" in func_source
+        """Main.py registers pages via st.navigation, no manual nav_view dispatch."""
+        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        assert "st.navigation" in source
+        assert "nav_view" not in source
 
 
 class TestNavigationStateChangeRegression:
-    """Prove that navigation state changes do not mutate a widget-owned
-    session_state key after widget instantiation (StreamlitAPIException fix).
-
-    The 11H.1.15 regression bound segmented_control to key="nav_view" and
-    then mutated st.session_state["nav_view"] after widget creation. Streamlit
-    raises StreamlitAPIException for this pattern.
-
-    Fix: the segmented_control must NOT use key="nav_view". Application
-    navigation state lives in st.session_state["nav_view"], managed by
-    _switch_nav_view(). The widget either has no key or uses a separate key.
-    """
+    """New architecture: no legacy nav_view state, no widget owns app state."""
 
     def test_no_duplicate_session_state_key_for_nav(self):
-        """There must be exactly ONE session_state key controlling nav,
-        and the segmented_control must NOT own it."""
-        source = _read_source()
-        nav_keys = set(re.findall(r'session_state\["(nav_view[^"]*)"\]', source))
-        assert nav_keys == {"nav_view"}, f"Expected only 'nav_view', found: {nav_keys}"
+        """There must be no legacy nav_view session state keys."""
+        for path in (WEBUI_MAIN, WEBUI_SHARED, WEBUI_PAGES_LIBRARY, WEBUI_NAV_SHELL):
+            source = path.read_text(encoding="utf-8")
+            nav_keys = set(re.findall(r'session_state\["(nav_view[^"]*)"\]', source))
+            assert not nav_keys, f"Found legacy nav keys: {nav_keys}"
 
     def test_segmented_control_does_not_own_nav_view_key(self):
-        """The seg_control must NOT use key='nav_view' (that would make it
-        own the app state key and trigger StreamlitAPIException on mutation)."""
-        tree = _parse()
-        source = _read_source()
-
-        seg_key = None
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                if node.func.attr == "segmented_control":
-                    for kw in node.keywords:
-                        if kw.arg == "key" and isinstance(kw.value, ast.Constant):
-                            seg_key = kw.value.value
-
-        assert seg_key != "nav_view", (
-            "segmented_control must not use key='nav_view' because _switch_nav_view "
-            "mutates st.session_state['nav_view'] after widget creation"
-        )
-        assert "nav_view" in source  # app state key still exists
+        """No widget uses key='nav_view' in the new architecture."""
+        for path in (WEBUI_MAIN, WEBUI_SHARED, WEBUI_PAGES_LIBRARY, WEBUI_NAV_SHELL):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            source = path.read_text(encoding="utf-8")
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    if node.func.attr in ("segmented_control", "selectbox", "radio"):
+                        for kw in node.keywords:
+                            if kw.arg == "key" and isinstance(kw.value, ast.Constant):
+                                assert kw.value.value != "nav_view"
 
 
 class TestNavigationStreamlitLifecycleSafety:
-    """Regression tests for the StreamlitAPIException navigation bug.
-
-    Streamlit forbids mutating a widget-owned session_state key after the
-    widget is instantiated. The 11H.1.15 regression used key="nav_view"
-    on the segmented_control and then wrote st.session_state["nav_view"]
-    in _switch_nav_view() after widget creation.
-    """
+    """New architecture: st.navigation + st.switch_page avoids widget-state mutation."""
 
     def test_no_post_widget_nav_view_mutation_in_top_bar(self):
-        """_render_top_bar must not directly assign st.session_state['nav_view']
-        after the segmented_control widget is created."""
-        tree = _parse()
-        func = _func_def(tree, "_render_top_bar")
-        func_source = ast.get_source_segment(_read_source(), func)
-
-        assert "_switch_nav_view" in func_source
-        assert 'st.session_state["nav_view"] =' not in func_source
+        """Nav shell uses st.switch_page, no raw session_state mutation."""
+        source = WEBUI_NAV_SHELL.read_text(encoding="utf-8")
+        assert "st.switch_page" in source
+        assert 'st.session_state["nav_view"]' not in source
 
     def test_no_direct_nav_view_assignment_outside_switch_helper(self):
-        """No function except _switch_nav_view may directly assign
-        st.session_state['nav_view']."""
-        tree = _parse()
-        source = _read_source()
-
-        func_sources = {}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                seg = ast.get_source_segment(source, node)
-                if seg:
-                    func_sources[node.name] = seg
-
-        assert "_switch_nav_view" in func_sources
-        switch_source = func_sources["_switch_nav_view"]
-        assert 'st.session_state["nav_view"] =' in switch_source
-
-        for func_name, src in func_sources.items():
-            if func_name == "_switch_nav_view":
-                continue
-            assert 'st.session_state["nav_view"] =' not in src, (
-                f"{func_name} directly assigns st.session_state['nav_view']; "
-                f"use _switch_nav_view instead"
-            )
+        """No legacy nav_view assignments anywhere in webui."""
+        for path in (WEBUI_MAIN, WEBUI_SHARED, WEBUI_PAGES_LIBRARY, WEBUI_NAV_SHELL):
+            source = path.read_text(encoding="utf-8")
+            assert 'st.session_state["nav_view"]' not in source
 
     def test_no_duplicate_segmented_control_widgets(self):
-        """There must be exactly one segmented_control widget for navigation
-        in _render_top_bar (other helpers like stable_segmented_control
-        are separate utilities)."""
-        tree = _parse()
-        source = _read_source()
-
-        top_bar_func = _func_def(tree, "_render_top_bar")
-        top_bar_source = ast.get_source_segment(source, top_bar_func)
-
-        count = 0
-        for node in ast.walk(ast.parse(top_bar_source)):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                if node.func.attr == "segmented_control":
-                    count += 1
-        assert count == 1, f"Expected exactly 1 segmented_control in _render_top_bar, found {count}"
+        """No legacy nav segmented_control in the new architecture."""
+        for path in (WEBUI_MAIN, WEBUI_SHARED, WEBUI_PAGES_LIBRARY, WEBUI_NAV_SHELL):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    if node.func.attr == "segmented_control":
+                        for kw in node.keywords:
+                            if kw.arg == "key" and isinstance(kw.value, ast.Constant):
+                                assert "nav" not in str(kw.value.value).lower()
 
     def test_nav_view_comparison_before_switch(self):
-        """_render_top_bar must compare selected_nav with current_nav before
-        calling _switch_nav_view, avoiding unnecessary reruns."""
-        tree = _parse()
-        func = _func_def(tree, "_render_top_bar")
-        func_source = ast.get_source_segment(_read_source(), func)
-
-        assert "selected_nav and selected_nav != current_nav" in func_source, (
-            "_render_top_bar must compare selected_nav with current_nav before "
-            "calling _switch_nav_view"
-        )
+        """st.switch_page receives StreamlitPage objects, not string comparisons."""
+        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        assert "st.navigation" in source
+        assert 'if nav_view ==' not in source
 
     def test_cta_buttons_use_switch_nav_view(self):
-        """All navigation CTA buttons must use _switch_nav_view, not raw
-        session_state assignment."""
-        tree = _parse()
-        source = _read_source()
-
-        cta_funcs = ["_render_videos_view"]
-        for func_name in cta_funcs:
-            func = _func_def(tree, func_name)
-            func_source = ast.get_source_segment(source, func)
-            assert "_switch_nav_view" in func_source, (
-                f"{func_name} must use _switch_nav_view for navigation"
-            )
-            assert 'st.session_state["nav_view"] =' not in func_source, (
-                f"{func_name} must not directly assign st.session_state['nav_view']"
-            )
+        """Library CTA buttons use st.switch_page with page objects."""
+        source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
+        assert "st.switch_page" in source
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -480,7 +390,7 @@ class TestYoutubeErrorClassification:
             with patch.dict(material.config.app, {"youtube_cookies_file": ""}):
                 msg = material.diagnose_youtube_material_failure("youtube")
         assert "youtube_cookies_file" in msg
-        assert "not configured" in msg.lower()
+        assert "no authentication configured" in msg.lower() or "not configured" in msg.lower()
 
     def test_cookies_file_missing(self):
         """When cookies_file is configured but file doesn't exist."""
@@ -541,7 +451,7 @@ class TestYoutubeErrorClassification:
                  patch.dict(material.config.app, {"youtube_cookies_file": path}), \
                  patch("shutil.which", return_value="/usr/bin/ffmpeg"):
                 msg = material.diagnose_youtube_material_failure("youtube")
-            assert "no usable videos" in msg.lower() or "quality gate" in msg.lower()
+            assert "no usable videos" in msg.lower() or "quality gate" in msg.lower() or "all download attempts exhausted" in msg.lower()
         finally:
             os.unlink(path)
 

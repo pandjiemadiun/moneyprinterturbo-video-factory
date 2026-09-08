@@ -20,6 +20,9 @@ import pytest
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
+WEBUI_PAGES_LIBRARY = ROOT_DIR / "webui" / "pages" / "library.py"
+WEBUI_SHARED = ROOT_DIR / "webui" / "shared.py"
+WEBUI_PAGES_CREATE = ROOT_DIR / "webui" / "pages" / "create.py"
 
 
 def _attribute_name(node):
@@ -66,28 +69,29 @@ class TestNoHardcodedLocalhostAPI:
     """ALL clear operations MUST use webui_api_client, never localhost:8080."""
 
     def test_no_hardcoded_127001_8080(self):
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
-        assert "127.0.0.1:8080" not in source
-        assert "localhost:8080" not in source
+        for path in (WEBUI_MAIN, WEBUI_SHARED, WEBUI_PAGES_LIBRARY):
+            source = path.read_text(encoding="utf-8")
+            assert "127.0.0.1:8080" not in source
+            assert "localhost:8080" not in source
 
     def test_clear_uses_webui_api_client(self):
-        tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+        tree = ast.parse(WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8"))
         calls = _all_call_names(tree)
         assert "webui_api_client.api_clear_tasks" in calls
         assert "webui_api_client.api_clear_all_tasks" in calls
 
     def test_no_raw_requests_post_to_localhost(self):
         """The only requests.post remaining should be for Groq, not localhost."""
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and _attribute_name(node.func) == "requests.post":
-                # Must not target localhost or 127.0.0.1
-                for kw in node.keywords:
-                    if kw.arg == "url" and isinstance(kw.value, ast.Constant):
-                        url = kw.value.value
-                        assert "127.0.0.1" not in str(url)
-                        assert "localhost" not in str(url)
+        for path in (WEBUI_SHARED, WEBUI_PAGES_LIBRARY):
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and _attribute_name(node.func) == "requests.post":
+                    for kw in node.keywords:
+                        if kw.arg == "url" and isinstance(kw.value, ast.Constant):
+                            url = kw.value.value
+                            assert "127.0.0.1" not in str(url)
+                            assert "localhost" not in str(url)
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +102,14 @@ class TestJobActionButtons:
     """Cancel / Retry / Delete buttons per job status via the API."""
 
     def test_job_card_has_api_action_calls(self):
-        tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+        tree = ast.parse(WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8"))
         calls = _all_call_names(tree)
         assert "webui_api_client.api_cancel_task" in calls
         assert "webui_api_client.api_retry_task" in calls
         assert "webui_api_client.api_delete_task" in calls
 
     def test_job_card_has_do_job_action_helper(self):
-        tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+        tree = ast.parse(WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8"))
         funcs = {
             node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
         }
@@ -113,30 +117,29 @@ class TestJobActionButtons:
 
     def test_queued_shows_cancel_not_retry(self):
         """_do_job_action must dispatch cancel for QUEUED tasks."""
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
-        assert "job_cancel" in source
-        assert "_do_job_action(task_id, \"cancel\")" in source or 'job_action(task_id, "cancel")' in source
+        source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
+        assert "task_cancel_" in source
+        assert "_do_job_action(task_id, \"cancel\")" in source
 
     def test_failed_shows_retry_and_delete(self):
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
-        assert "job_retry" in source
-        assert "_do_job_action(task_id, \"retry\")" in source or "_do_job_action(task_id, \"delete\")" in source
+        source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
+        assert "task_retry_" in source
+        assert "_do_job_action(task_id, \"retry\")" in source
+        assert "_do_job_action(task_id, \"delete\")" in source
 
     def test_complete_shows_delete(self):
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
-        assert "job_delete" in source
+        source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
+        assert "task_delete_" in source
 
     def test_processing_no_fake_cancel(self):
         """PROCESSING tasks must NOT have a Cancel button."""
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
         tree = ast.parse(source)
-        # Find the _render_job_card function
         func = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "_render_job_card"
+            if isinstance(n, ast.FunctionDef) and n.name == "_render_task_card"
         )
         func_source = ast.get_source_segment(source, func)
-        # The PROCESSING branch should not create a cancel button
         processing_section = func_source[
             func_source.find('TASK_STATE_PROCESSING'):
             func_source.find('TASK_STATE_FAILED') if 'TASK_STATE_FAILED' in func_source
@@ -153,16 +156,17 @@ class TestInBrowserVideoPlayback:
     """Play must use st.video (in-browser), never xdg-open."""
 
     def test_no_xdg_open(self):
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
-        assert "xdg-open" not in source
-        assert "os.startfile" not in source
+        for path in (WEBUI_MAIN, WEBUI_SHARED, WEBUI_PAGES_LIBRARY):
+            source = path.read_text(encoding="utf-8")
+            assert "xdg-open" not in source
+            assert "os.startfile" not in source
 
     def test_no_xdg_open_in_open_task_video(self):
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        source = WEBUI_SHARED.read_text(encoding="utf-8")
         tree = ast.parse(source)
         func = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "_open_task_video"
+            if isinstance(n, ast.FunctionDef) and n.name == "open_task_video"
         )
         func_source = ast.get_source_segment(source, func)
         assert "xdg" not in func_source
@@ -170,7 +174,7 @@ class TestInBrowserVideoPlayback:
         assert "os.startfile" not in func_source
 
     def test_st_video_used_for_playback(self):
-        tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+        tree = ast.parse(WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8"))
         attrs = _all_attribute_access(tree)
         assert "st.video" in attrs
 
@@ -190,15 +194,14 @@ class TestDeleteRoutesThroughAPI:
     """UI Delete → API delete endpoint → canonical state + artifact deletion."""
 
     def test_delete_task_uses_api_client(self):
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        source = WEBUI_SHARED.read_text(encoding="utf-8")
         tree = ast.parse(source)
         func = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "_delete_task"
+            if isinstance(n, ast.FunctionDef) and n.name == "delete_task"
         )
         calls = _all_call_names(func)
         assert "webui_api_client.api_delete_task" in calls
-        # Must NOT directly call sm.state.delete_task or shutil.rmtree
         func_source = ast.get_source_segment(source, func)
         assert "sm.state" not in func_source
         assert "shutil.rmtree" not in func_source
@@ -248,11 +251,11 @@ class TestWebUIIsPureAPIClient:
         assert "TaskManager(" not in source
 
     def test_no_filesystem_task_scan_in_collect_summaries(self):
-        """_collect_task_summaries must NOT call _scan_history_tasks."""
-        tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+        """collect_task_summaries must NOT call _scan_history_tasks."""
+        tree = ast.parse(WEBUI_SHARED.read_text(encoding="utf-8"))
         func = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "_collect_task_summaries"
+            if isinstance(n, ast.FunctionDef) and n.name == "collect_task_summaries"
         )
         calls = _all_call_names(func)
         assert "_scan_history_tasks" not in calls
@@ -266,8 +269,9 @@ class TestWebUIIsPureAPIClient:
         assert "sm.state" not in src
 
     def test_webui_api_client_used_for_all_state_ops(self):
-        tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
-        calls = _all_call_names(tree)
+        tree = ast.parse(WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8"))
+        shared_tree = ast.parse(WEBUI_SHARED.read_text(encoding="utf-8"))
+        calls = _all_call_names(tree) | _all_call_names(shared_tree)
         expected = {
             "webui_api_client.api_list_tasks",
             "webui_api_client.api_get_task",
@@ -313,8 +317,8 @@ class TestClearOperations:
         assert "errors" in result
 
     def test_clear_buttons_use_api_client(self):
-        tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        tree = ast.parse(WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8"))
+        source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
         # Verify the 5 clear buttons are present
         assert 'btn_clear_completed' in source
         assert 'btn_clear_failed' in source
@@ -408,8 +412,8 @@ class TestTaskIdFlow:
         assert result != "local-id-456"
 
     def test_generation_controls_uses_returned_id(self):
-        """_render_generation_controls must store the returned API task_id."""
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        """render_create must store the returned API task_id."""
+        source = WEBUI_PAGES_CREATE.read_text(encoding="utf-8")
         assert "api_task_id = webui_task.submit_generation" in source
 
 
@@ -452,37 +456,33 @@ class TestNavigationCanonicalState:
                         )
 
     def test_switch_nav_view_helper_exists(self):
-        """A canonical _switch_nav_view helper must exist."""
+        """The old _switch_nav_view helper was replaced by st.navigation() +
+        st.switch_page() in Main.py. Verify the new canonical entry point."""
         tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
-        funcs = {
-            node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        calls = {
+            _attribute_name(node.func)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
         }
-        assert "_switch_nav_view" in funcs
+        assert "st.navigation" in calls
+        assert "st.switch_page" not in calls  # Main.py only registers pages
 
     def test_videos_empty_cta_uses_switch_nav_view(self):
-        """The Videos empty-state CTA must use _switch_nav_view, not raw
-        session_state assignment + rerun."""
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        """The old _render_videos_view was replaced by render_library in
+        webui/pages/library.py. Verify navigation uses st.switch_page with
+        page objects."""
+        source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
         tree = ast.parse(source)
-        func = next(
-            n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "_render_videos_view"
-        )
-        func_source = ast.get_source_segment(source, func)
-        assert "_switch_nav_view" in func_source
-        # Must NOT have the old anti-pattern
-        assert 'st.session_state["nav_view"] = "create"' not in func_source
+        assert "st.switch_page" in source
+        assert 'st.session_state["nav_view"] = "create"' not in source
 
     def test_top_bar_uses_switch_nav_view(self):
-        """_render_top_bar must dispatch navigation via _switch_nav_view."""
-        source = WEBUI_MAIN.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        func = next(
-            n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "_render_top_bar"
-        )
-        func_source = ast.get_source_segment(source, func)
-        assert "_switch_nav_view" in func_source
+        """The old _render_top_bar was replaced by nav_shell.py. Verify
+        the shell uses page objects for navigation."""
+        from pathlib import Path
+        nav_shell = Path(__file__).parent.parent.parent / "webui" / "nav_shell.py"
+        source = nav_shell.read_text(encoding="utf-8")
+        assert "st.switch_page" in source
 
 
 # ---------------------------------------------------------------------------

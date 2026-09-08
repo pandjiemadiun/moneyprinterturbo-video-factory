@@ -6,12 +6,12 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).parent.parent.parent
-WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
+WEBUI_MAIN = ROOT_DIR / "webui" / "shared.py"
 TASK_HISTORY_HELPERS = {
-    "_find_final_task_video",
-    "_build_video_download_name",
-    "_build_restore_upload_requirements",
-    "_get_unmet_restore_upload_requirements",
+    "find_final_task_video",
+    "build_video_download_name",
+    "build_restore_upload_requirements",
+    "get_unmet_restore_upload_requirements",
 }
 TASK_HISTORY_CONSTANTS = {
     "_FINAL_VIDEO_PATTERN",
@@ -47,13 +47,13 @@ def _load_task_history_helpers():
 
 
 TASK_HISTORY_NAMESPACE = _load_task_history_helpers()
-find_final_task_video = TASK_HISTORY_NAMESPACE["_find_final_task_video"]
-build_video_download_name = TASK_HISTORY_NAMESPACE["_build_video_download_name"]
+find_final_task_video = TASK_HISTORY_NAMESPACE["find_final_task_video"]
+build_video_download_name = TASK_HISTORY_NAMESPACE["build_video_download_name"]
 build_restore_upload_requirements = TASK_HISTORY_NAMESPACE[
-    "_build_restore_upload_requirements"
+    "build_restore_upload_requirements"
 ]
 get_unmet_restore_upload_requirements = TASK_HISTORY_NAMESPACE[
-    "_get_unmet_restore_upload_requirements"
+    "get_unmet_restore_upload_requirements"
 ]
 
 
