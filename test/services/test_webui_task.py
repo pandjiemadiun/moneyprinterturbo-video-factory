@@ -18,6 +18,7 @@ from app.utils import logging_utils
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
+WEBUI_SHARED = ROOT_DIR / "webui" / "shared.py"
 
 
 def _attribute_name(node):
@@ -136,13 +137,13 @@ def test_completed_task_renders_subject_named_video_download(
     tmp_path, ui_config, expected_open_count
 ):
     """完成任务应提供成片下载，并按 WebUI 配置决定是否自动打开目录。"""
-    tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+    tree = ast.parse(WEBUI_SHARED.read_text(encoding="utf-8"))
     selected_nodes = []
     target_names = {
         "_DOWNLOAD_FILENAME_INVALID_PATTERN",
-        "_build_video_download_name",
-        "_normalize_task_state",
-        "_render_generation_task_snapshot",
+        "build_video_download_name",
+        "normalize_task_state",
+        "render_generation_task_snapshot",
     }
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
@@ -203,12 +204,12 @@ def test_completed_task_renders_subject_named_video_download(
         "re": re,
         "st": fake_st,
         "tr": lambda key: key,
-        "_render_generation_logs": lambda _task_id: None,
+        "render_generation_logs": lambda _task_id: None,
     }
     module = ast.fix_missing_locations(ast.Module(body=selected_nodes, type_ignores=[]))
-    exec(compile(module, str(WEBUI_MAIN), "exec"), namespace)
+    exec(compile(module, str(WEBUI_SHARED), "exec"), namespace)
 
-    namespace["_render_generation_task_snapshot"](
+    namespace["render_generation_task_snapshot"](
         "download-test",
         {
             "state": const.TASK_STATE_COMPLETE,
@@ -292,12 +293,12 @@ def test_generation_log_fragment_refreshes_within_half_a_second():
     """日志轮询间隔不能退回到明显落后于终端输出的秒级刷新。"""
     assert webui_task.TASK_LOG_REFRESH_INTERVAL_SECONDS <= 0.5
 
-    tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+    tree = ast.parse(WEBUI_SHARED.read_text(encoding="utf-8"))
     function = next(
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef)
-        and node.name == "_render_running_generation_task"
+        and node.name == "render_running_generation_task"
     )
     decorator = function.decorator_list[0]
     assert isinstance(decorator, ast.Call)
