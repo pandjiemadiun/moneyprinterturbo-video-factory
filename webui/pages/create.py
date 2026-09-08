@@ -12,6 +12,8 @@ import os
 import hashlib
 import math
 import mimetypes
+import tempfile
+from pathlib import Path
 from uuid import uuid4
 from loguru import logger
 
@@ -731,26 +733,24 @@ def _synthesize_voice_preview(*, content, preview_type, selected_tts_server, voi
         text = content
     else:
         text = content
-    if selected_tts_server == "azure-tts-v1":
-        audio_bytes = voice.azure_tts_v1(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
-    elif selected_tts_server == "azure-tts-v2":
-        audio_bytes = voice.azure_tts_v2(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
-    elif selected_tts_server == "siliconflow":
-        audio_bytes = voice.siliconflow_tts(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
-    elif selected_tts_server == "gemini-tts":
-        audio_bytes = voice.gemini_tts(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
-    elif selected_tts_server == "mimo-tts":
-        audio_bytes = voice.mimo_tts(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
-    elif selected_tts_server == "minimax-tts":
-        audio_bytes = voice.minimax_tts(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
-    elif selected_tts_server == "elevenlabs":
-        audio_bytes = voice.elevenlabs_tts(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
-    elif selected_tts_server == "chatterbox":
-        audio_bytes = voice.chatterbox_tts(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
-    elif selected_tts_server == "fish_audio":
-        audio_bytes = voice.fish_audio_tts(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
-    else:
-        audio_bytes = voice.azure_tts_v1(text=text, voice_name=voice_name, rate=voice_rate, volume=voice_volume)
+    with config.try_runtime_config_lock() as lock_acquired:
+        if not lock_acquired:
+            return {"busy": True}
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as voice_file:
+        voice_file_path = voice_file.name
+    try:
+        submaker = voice.tts(
+            text=text,
+            voice_name=voice_name,
+            voice_rate=voice_rate,
+            voice_file=voice_file_path,
+            voice_volume=voice_volume,
+        )
+        if not submaker:
+            return None
+        audio_bytes = Path(voice_file_path).read_bytes()
+    finally:
+        Path(voice_file_path).unlink(missing_ok=True)
     if not audio_bytes:
         return None
     mime_type = _detect_audio_mime("preview.mp3", audio_bytes)
