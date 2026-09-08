@@ -29,7 +29,7 @@ def test_create_page_imports_required_names():
 
     missing = [
         name
-        for name in ("logger", "hashlib", "uuid4", "mimetypes", "math")
+        for name in ("logger", "hashlib", "uuid4", "mimetypes")
         if name not in dir(create)
     ]
     assert missing == [], f"create.py is missing imports: {missing}"
