@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from app.services.material import rank_videos
-from app.models.const import VideoAspect
+from app.models.schema import VideoAspect
 
 
 class TestPexelsProviderFix:
@@ -19,20 +19,21 @@ class TestPexelsProviderFix:
 class TestRankVideos:
     """Verify rank_videos logging for rejected candidates."""
 
-    def test_rank_videos_logs_rejections(self, caplog):
+    def test_rank_videos_logs_rejections(self, monkeypatch):
         """When all candidates are rejected, log the rejection reasons."""
-        from app.services.material import rank_videos
+        from app.services.material import rank_videos, logger as material_logger
 
-        # Create a mock item that will be rejected by duration filter
+        calls = []
+        monkeypatch.setattr(material_logger, "debug", lambda msg: calls.append(msg))
+
         item = MagicMock()
         item.duration = 1  # Too short
         item.source_info = {}
 
-        with caplog.at_level("DEBUG"):
-            result = rank_videos([item], "test", 5, VideoAspect.portrait)
+        result = rank_videos([item], "test", 5, VideoAspect.portrait)
 
         assert result == []
-        assert "rejected" in caplog.text.lower()
+        assert any("rejected" in str(call).lower() for call in calls)
 
     def test_rank_videos_accepts_valid_candidates(self):
         """Valid candidates should not be rejected."""
