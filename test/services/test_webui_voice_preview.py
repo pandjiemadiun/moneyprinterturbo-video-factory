@@ -13,6 +13,7 @@ from app.config import config
 from app.models.schema import VideoParams
 from app.services import task as tm
 from app.services import voice
+from app.services import webui_api_client
 from app.services import webui_task
 from app.utils import utils
 
@@ -114,6 +115,7 @@ def test_full_voiceover_preview_is_disabled_until_script_exists():
     with (
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
+        patch.object(webui_api_client, "api_list_tasks", return_value=([], 0)),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "zh"
@@ -138,6 +140,7 @@ def test_script_shows_estimate_and_enables_full_voiceover_preview():
     with (
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
+        patch.object(webui_api_client, "api_list_tasks", return_value=([], 0)),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "zh"
@@ -174,8 +177,9 @@ def test_short_preview_autoplays_only_after_explicit_click_and_reuses_cache():
     with (
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
-        patch.object(voice, "tts", side_effect=fake_tts) as synthesize,
+        patch.object(voice, "azure_tts_v1", side_effect=fake_tts) as synthesize,
         patch.object(voice, "get_audio_duration", return_value=3.0),
+        patch.object(webui_api_client, "api_list_tasks", return_value=([], 0)),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "zh"
@@ -217,7 +221,7 @@ def test_full_preview_uses_script_and_reuses_identical_cached_audio():
     with (
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
-        patch.object(voice, "tts", side_effect=fake_tts) as synthesize,
+        patch.object(voice, "azure_tts_v1", side_effect=fake_tts) as synthesize,
         patch.object(voice, "get_audio_duration", return_value=12.3),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
@@ -253,7 +257,8 @@ def test_full_preview_reports_when_tts_returns_no_audio():
     with (
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
-        patch.object(voice, "tts", return_value=None),
+        patch.object(voice, "azure_tts_v1", return_value=None),
+        patch.object(webui_api_client, "api_list_tasks", return_value=([], 0)),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
         app.session_state["ui_language"] = "zh"
@@ -264,7 +269,7 @@ def test_full_preview_reports_when_tts_returns_no_audio():
             "generate_full_voiceover_preview_button",
         ).click().run()
 
-    assert [item.value for item in app.error] == [
+    assert [str(item.value) for item in app.error] == [
         "配音服务未返回试听音频，请检查相关设置和应用日志。"
     ]
     assert [str(item.value) for item in app.exception] == []
@@ -472,19 +477,15 @@ def test_non_default_volume_regenerates_audio_without_double_gain():
 def test_webui_worker_forwards_voice_preview_to_pipeline():
     """后台任务包装层不能丢失提交时已经校验过的试听缓存。"""
     preview = {"audio_file": "audio.mp3", "duration": 5.0}
-    with (
-        patch.object(webui_task.tm, "start", return_value={"videos": []}) as start,
-        patch.object(
-            webui_task.config,
-            "runtime_config_lock",
-            return_value=nullcontext(),
-        ),
-    ):
-        webui_task._run_generation(
+    params = VideoParams(video_subject="preview forwarding")
+    with patch.object(
+        webui_api_client, "api_create_task", return_value={"task_id": "api-task-id"}
+    ) as create_task:
+        webui_task.submit_generation(
             "preview-forwarding",
-            VideoParams(video_subject="preview forwarding"),
+            params,
             capture_logs=False,
             voice_preview=preview,
         )
 
-    assert start.call_args.kwargs["voice_preview"] == preview
+    assert create_task.call_args.args[0]["voice_preview"] == preview
