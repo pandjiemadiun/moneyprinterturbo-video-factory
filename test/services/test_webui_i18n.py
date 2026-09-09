@@ -10,10 +10,11 @@ from app.utils import utils
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
+WEBUI_SHARED = ROOT_DIR / "webui" / "shared.py"
 I18N_DIR = ROOT_DIR / "webui" / "i18n"
 LLM_PROVIDER_TIPS_PREFIX = "llm_provider_tips."
 TTS_PROVIDER_TIPS_PREFIX = "tts_provider_tips."
-SECONDARY_LOCALES = ("de", "es", "id", "it", "pt", "ru", "tr", "vi")
+SECONDARY_LOCALES = ("id",)
 PROVIDER_TIPS_PREFIXES = (
     LLM_PROVIDER_TIPS_PREFIX,
     TTS_PROVIDER_TIPS_PREFIX,
@@ -222,8 +223,8 @@ class TestWebuiI18n(unittest.TestCase):
                         _markdown_urls(en_translations[key]),
                     )
 
-    def test_script_language_options_include_russian(self):
-        tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+    def test_script_language_options_include_indonesian(self):
+        tree = ast.parse(WEBUI_SHARED.read_text(encoding="utf-8"))
         support_locales = None
 
         for node in tree.body:
@@ -237,4 +238,4 @@ class TestWebuiI18n(unittest.TestCase):
                 break
 
         self.assertIsNotNone(support_locales)
-        self.assertIn("ru-RU", support_locales)
+        self.assertIn("id-ID", support_locales)

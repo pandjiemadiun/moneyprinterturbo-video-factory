@@ -148,7 +148,7 @@ KEY_BACKUP_EXCLUDED_SECTIONS = frozenset({"ui"})
 
 support_locales = [
     "zh-CN", "zh-HK", "zh-TW", "de-DE", "en-US", "es-ES",
-    "fr-FR", "it-IT", "ru-RU", "vi-VN", "th-TH", "tr-TR",
+    "fr-FR", "id-ID", "it-IT", "ru-RU", "th-TH", "tr-TR",
 ]
 
 
