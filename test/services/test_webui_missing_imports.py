@@ -42,7 +42,7 @@ def test_settings_page_imports_logger():
     assert "logger" in dir(settings), "settings.py must `from loguru import logger`"
 
 
-def test_handle_generation_submit_reaches_api_without_nameerror():
+def test_handle_generation_submit_reaches_api_without_nameerror(monkeypatch):
     """The Generate Video path must reach submit_generation (no NameError).
 
     Before the fix: ``logger.info("Start Generating Video")`` executed inside
@@ -59,18 +59,18 @@ def test_handle_generation_submit_reaches_api_without_nameerror():
     # --- Streamlit surface: session_state behaves as a plain dict ---
     mock_st = MagicMock()
     mock_st.session_state = {"pending_generation_task_id": None}
-    create.st = mock_st
+    monkeypatch.setattr(create, "st", mock_st)
 
     # --- Mock the side-effecting collaborators (no API / no config write) ---
-    create.webui_task = MagicMock()
+    monkeypatch.setattr(create, "webui_task", MagicMock())
     create.webui_task.submit_generation.return_value = "api-task-id"
-    create._save_runtime_config = MagicMock()
-    create.add_active_generation_task = MagicMock()
-    create.remove_active_generation_task = MagicMock()
-    create._get_reusable_full_voice_preview = MagicMock(return_value=None)
-    create.utils = MagicMock()
+    monkeypatch.setattr(create, "_save_runtime_config", MagicMock())
+    monkeypatch.setattr(create, "add_active_generation_task", MagicMock())
+    monkeypatch.setattr(create, "remove_active_generation_task", MagicMock())
+    monkeypatch.setattr(create, "_get_reusable_full_voice_preview", MagicMock(return_value=None))
+    monkeypatch.setattr(create, "utils", MagicMock())
     create.utils.to_json.return_value = "{}"
-    create.tr = lambda s, **kw: s
+    monkeypatch.setattr(create, "tr", lambda s, **kw: s)
 
     # `loomloom` is a valid source with no API-key guard; `video_subject` is set
     # so the empty-form guard is skipped; voice_mode is not UPLOAD, so the
