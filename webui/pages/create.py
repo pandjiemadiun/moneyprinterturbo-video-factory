@@ -464,23 +464,6 @@ def _effective_script_generation_backend():
     return backend if backend in {"local", "loomloom"} else "local"
 
 
-def _effective_loomloom_api_token():
-    app_config_snapshot = config.snapshot_config_with_pending(config.app)
-    return loomloom.resolve_api_token(app_config_snapshot)
-
-
-def _create_loomloom_script_backend():
-    app_config_snapshot = config.snapshot_config_with_pending(config.app)
-    settings = loomloom.LoomLoomSettings.from_mapping(app_config_snapshot)
-    return loomloom.LoomLoomScriptBackend(settings)
-
-
-def _create_loomloom_video_backend():
-    app_config_snapshot = config.snapshot_config_with_pending(config.app)
-    settings = loomloom.video_settings_from_mapping(app_config_snapshot)
-    return loomloom.LoomLoomVideoBackend(settings)
-
-
 def _render_loomloom_script_generation(params):
     st.caption(tr("LoomLoom Batch Script Generation Help"))
     effective_token = _render_loomloom_api_token_input()
@@ -1159,38 +1142,3 @@ def _handle_generation_submit(params, uploaded_files, uploaded_audio_file, voice
     del st.session_state["pending_generation_task_id"]
     st.session_state["current_generation_task_id"] = api_task_id
     logger.info(f"WebUI generation task submitted: task_id={api_task_id}")
-
-
-def _get_reusable_full_voice_preview(params, voice_mode):
-    if voice_mode != VOICE_MODE_TTS:
-        return None
-    script_content = str(params.video_script or "").strip()
-    selected_tts_server = config.ui.get("tts_server", "azure-tts-v1")
-    if not script_content or not params.voice_name or not math.isclose(float(params.voice_volume), 1.0):
-        return None
-    expected_fingerprint = _voice_preview_fingerprint(
-        preview_type="full", content=script_content, tts_server=selected_tts_server,
-        voice_name=params.voice_name, voice_rate=params.voice_rate, voice_volume=params.voice_volume,
-        provider_signature=_get_voice_preview_provider_signature(selected_tts_server),
-    )
-    cached_preview = st.session_state.get("voice_preview_audio")
-    if (
-        not cached_preview
-        or cached_preview.get("fingerprint") != expected_fingerprint
-        or cached_preview.get("preview_type") != "full"
-        or not cached_preview.get("audio_bytes")
-        or cached_preview.get("sub_maker") is None
-    ):
-        return None
-    duration = cached_preview.get("duration")
-    if not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
-        return None
-    return {
-        "audio_bytes": bytes(cached_preview["audio_bytes"]),
-        "duration": float(duration),
-        "sub_maker": cached_preview["sub_maker"],
-        "script": script_content,
-        "voice_name": params.voice_name,
-        "voice_rate": float(params.voice_rate),
-        "voice_volume": float(params.voice_volume),
-    }
