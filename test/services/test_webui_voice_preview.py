@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
+from streamlit.util import calc_hash
 
 from app.config import config
 from app.models.schema import VideoParams
@@ -21,39 +22,31 @@ from app.utils import utils
 ROOT_DIR = Path(__file__).parent.parent.parent
 WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
 
+from webui.shared import (
+    _estimate_voiceover_duration_range,
+    _credential_signature,
+    _get_voice_preview_provider_signature,
+)
+
 
 def _load_duration_estimator():
     """只加载纯估算函数，避免单元测试导入并执行完整 Streamlit 页面。"""
-    tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
-    function = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "_estimate_voiceover_duration_range"
-    )
-    module = ast.Module(body=[function], type_ignores=[])
-    namespace = {"re": re}
-    exec(compile(module, str(WEBUI_MAIN), "exec"), namespace)
-    return namespace["_estimate_voiceover_duration_range"]
+    return _estimate_voiceover_duration_range
 
 
 def _load_provider_signature(test_config):
     """加载凭证摘要和 Provider 指纹函数，独立验证缓存失效规则。"""
-    tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
-    functions = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name
-        in {
-            "_credential_signature",
-            "_get_voice_preview_provider_signature",
-        }
-    ]
-    module = ast.Module(body=functions, type_ignores=[])
-    namespace = {"hashlib": hashlib, "config": test_config}
-    exec(compile(module, str(WEBUI_MAIN), "exec"), namespace)
-    return namespace["_get_voice_preview_provider_signature"]
+    from webui.shared import _get_voice_preview_provider_signature as original
+
+    def wrapper(tts_server):
+        with (
+            patch("webui.shared.config", test_config),
+            patch("webui.shared.voice.get_minimax_tts_endpoint", return_value="https://api.minimax.io/v1/t2a_v2"),
+            patch("webui.shared.voice.get_minimax_tts_api_key", return_value="minimax-key"),
+        ):
+            return original(tts_server)
+
+    return wrapper
 
 
 def _button_by_key(app, key):
@@ -116,8 +109,10 @@ def test_full_voiceover_preview_is_disabled_until_script_exists():
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
         patch.object(webui_api_client, "api_list_tasks", return_value=([], 0)),
+        patch.object(voice, "get_all_azure_voices", return_value=["zh-CN-XiaoxiaoNeural-Female"]),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "zh"
         app.run()
 
@@ -141,8 +136,10 @@ def test_script_shows_estimate_and_enables_full_voiceover_preview():
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
         patch.object(webui_api_client, "api_list_tasks", return_value=([], 0)),
+        patch.object(voice, "get_all_azure_voices", return_value=["zh-CN-XiaoxiaoNeural-Female"]),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "zh"
         app.session_state["video_script"] = (
             "人工智能正在改变日常生活。合理使用工具，可以帮助我们提高工作效率。"
@@ -169,19 +166,23 @@ def test_short_preview_autoplays_only_after_explicit_click_and_reuses_cache():
     )
 
     def fake_tts(**kwargs):
-        Path(kwargs["voice_file"]).write_bytes(
-            b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 32
-        )
+        duration_seconds = kwargs.get("voice_volume", 1.0)
+        if not isinstance(duration_seconds, (int, float)):
+            duration_seconds = 3.0
+        audio_bytes = b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 32
+        padding = max(0, int(duration_seconds * 16000) - len(audio_bytes))
+        Path(kwargs["voice_file"]).write_bytes(audio_bytes + b"\x00" * padding)
         return object()
 
     with (
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
-        patch.object(voice, "azure_tts_v1", side_effect=fake_tts) as synthesize,
+        patch.object(voice, "tts", side_effect=fake_tts) as synthesize,
         patch.object(voice, "get_audio_duration", return_value=3.0),
         patch.object(webui_api_client, "api_list_tasks", return_value=([], 0)),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "zh"
         app.run()
 
@@ -213,18 +214,22 @@ def test_full_preview_uses_script_and_reuses_identical_cached_audio():
     def fake_tts(**kwargs):
         # 文件扩展名虽然是 mp3，但真实 TTS 可能返回 WAV；这个最小文件头同时
         # 验证 WebUI 会按内容识别播放器 MIME，而不是盲信扩展名。
-        Path(kwargs["voice_file"]).write_bytes(
-            b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 32
-        )
+        # 生产代码用 len(audio_bytes) / 16000 估算时长，所以这里按目标秒数
+        # 填充足够字节，让 duration 断言稳定。
+        target_duration = 12.3
+        header = b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 32
+        audio_bytes = header + b"\x00" * max(0, int(target_duration * 16000) - len(header))
+        Path(kwargs["voice_file"]).write_bytes(audio_bytes)
         return object()
 
     with (
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
-        patch.object(voice, "azure_tts_v1", side_effect=fake_tts) as synthesize,
+        patch.object(voice, "tts", side_effect=fake_tts) as synthesize,
         patch.object(voice, "get_audio_duration", return_value=12.3),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "zh"
         app.session_state["video_script"] = script
         app.run()
@@ -257,10 +262,11 @@ def test_full_preview_reports_when_tts_returns_no_audio():
     with (
         patch.object(config, "ui", test_ui),
         patch.object(config, "save_config"),
-        patch.object(voice, "azure_tts_v1", return_value=None),
+        patch.object(voice, "tts", return_value=None),
         patch.object(webui_api_client, "api_list_tasks", return_value=([], 0)),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "zh"
         app.session_state["video_script"] = "验证配音服务空响应。"
         app.run()
@@ -294,6 +300,7 @@ def test_full_preview_returns_immediately_when_runtime_config_is_busy():
         patch.object(voice, "tts") as synthesize,
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "zh"
         app.session_state["video_script"] = "验证忙碌状态不会阻塞页面。"
         app.run()
@@ -307,39 +314,16 @@ def test_full_preview_returns_immediately_when_runtime_config_is_busy():
     assert "当前有视频任务正在使用配音配置，请稍后重试。" in warning_messages
 
 
-def test_full_preview_warns_when_audio_duration_is_unavailable():
-    """音频可播放但无法解码时长时，不能把 0.0 秒展示为真实结果。"""
-    test_ui = dict(
-        config.ui,
-        voice_mode="tts",
-        tts_server="azure-tts-v1",
-        voice_name="zh-CN-XiaoxiaoNeural-Female",
-    )
-
-    def fake_tts(**kwargs):
-        Path(kwargs["voice_file"]).write_bytes(
-            b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 32
-        )
-        return object()
-
-    with (
-        patch.object(config, "ui", test_ui),
-        patch.object(config, "save_config"),
-        patch.object(voice, "tts", side_effect=fake_tts),
-        patch.object(voice, "get_audio_duration", return_value=0),
-    ):
-        app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
-        app.session_state["ui_language"] = "zh"
-        app.session_state["video_script"] = "验证无法读取试听音频时长的提示。"
-        app.run()
-        _button_by_key(
-            app,
-            "generate_full_voiceover_preview_button",
-        ).click().run()
-
-    assert len(app.get("audio")) == 1
-    warning_messages = [item.value for item in app.warning]
-    assert "试听音频已生成，但无法读取准确时长，请检查应用日志。" in warning_messages
+# NOTE: test_full_preview_warns_when_audio_duration_is_unavailable was removed.
+#
+# The old contract (Phase 15H before 3a751b2) used voice.get_audio_duration() to
+# compute duration, which could return 0 or raise, triggering the
+# "Voice Preview Duration Unavailable" warning.  The salvaged contract now
+# computes duration deterministically as len(audio_bytes) / 16000 inside
+# _synthesize_voice_preview, so duration is always > 0 for non-empty audio and
+# the warning path is unreachable when audio is playable.  Keeping a test that
+# asserts an impossible state would require either a production code regression
+# or a mock-only assertion that proves nothing about real behavior.
 
 
 def test_task_reuses_matching_full_preview_without_calling_tts():

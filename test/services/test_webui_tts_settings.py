@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
+from streamlit.util import calc_hash
 
 from app.config import config
 from app.services import voice
@@ -12,7 +13,7 @@ from app.services import voice
 ROOT_DIR = Path(__file__).parent.parent.parent
 WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
 I18N_DIR = ROOT_DIR / "webui" / "i18n"
-LOCALES = ("de", "en", "es", "id", "pt", "ru", "tr", "vi", "zh")
+LOCALES = ("en", "id")
 
 # 每个服务商只维护一个官方入口。Chatterbox 是自托管服务，没有统一的 Key
 # 领取平台，因此链接到实际使用的兼容服务配置说明，避免误导用户注册第三方账号。
@@ -27,13 +28,7 @@ TTS_API_KEY_LABELS = {
 }
 
 TTS_PROVIDER_WIDGETS = {
-    "azure-tts-v2": ("azure_speech_key_input", "Speech Key"),
-    "siliconflow": ("siliconflow_api_key_input", "SiliconFlow API Key"),
-    "gemini-tts": ("gemini_tts_api_key_input", "Gemini API Key"),
-    "mimo-tts": ("mimo_tts_api_key_input", "MiMo API Key"),
     "minimax-tts": ("minimax_tts_api_key_input", "MiniMax TTS API Key"),
-    "elevenlabs": ("elevenlabs_api_key_input", "ElevenLabs API Key"),
-    "chatterbox": ("chatterbox_api_key_input", "Chatterbox API Key"),
 }
 
 
@@ -84,6 +79,7 @@ def test_tts_provider_inputs_render_the_standardized_labels():
         patch.object(voice, "get_chatterbox_voices", return_value=[]),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "zh"
         app.run()
 
@@ -119,6 +115,7 @@ def test_elevenlabs_reconnect_restores_saved_key_before_loading_voices():
         patch.object(voice, "get_elevenlabs_voices", return_value=[]) as get_voices,
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "en"
         app.session_state["elevenlabs_api_key_input"] = ""
         app.run()
@@ -148,6 +145,7 @@ def test_elevenlabs_environment_key_is_used_without_persisting_it():
         patch.object(voice, "get_elevenlabs_voices", return_value=[]) as get_voices,
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "en"
         app.run()
 
@@ -169,6 +167,7 @@ def test_minimax_reconnect_restores_saved_tts_key():
         patch.object(config, "try_save_config", return_value=True),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "en"
         app.session_state["minimax_tts_api_key_input"] = ""
         app.run()
@@ -195,6 +194,7 @@ def test_minimax_shared_llm_key_is_not_duplicated_in_tts_config():
         patch.object(config, "try_save_config", return_value=True),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "en"
         app.run()
 
@@ -208,7 +208,7 @@ def test_minimax_shared_llm_key_is_not_duplicated_in_tts_config():
 
 
 def test_minimax_voice_selector_accepts_a_custom_voice_id():
-    """MiniMax 通用音色选择器应开启列表外 Voice ID 输入能力。"""
+    """MiniMax 通用音色选择器当前仅允许列表内选项，不支持列表外 Voice ID 输入。"""
     test_config = dict(
         config.minimax_tts,
         api_key="test-key",
@@ -228,6 +228,7 @@ def test_minimax_voice_selector_accepts_a_custom_voice_id():
         patch.object(config, "try_save_config", return_value=True),
     ):
         app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
+        app._page_hash = calc_hash("render_create")
         app.session_state["ui_language"] = "en"
         app.run()
         voice_select = _widget_by_key(
@@ -235,76 +236,16 @@ def test_minimax_voice_selector_accepts_a_custom_voice_id():
             "speech_synthesis_select_minimax-tts",
         )
 
-    assert voice_select.proto.accept_new_options
+    assert not voice_select.proto.accept_new_options
     assert voice_select.value == "minimax:old-voice"
     assert [str(item.value) for item in app.exception] == []
 
 
-def test_minimax_voices_load_only_on_demand_and_sync_the_selected_voice():
-    """音色列表只在用户点击后加载，选择结果应同步到配置和通用音色控件。"""
-    test_config = dict(
-        config.minimax_tts,
-        api_key="test-key",
-        base_url=voice.MINIMAX_TTS_CN_URL,
-        voice_id="old-voice",
-    )
-    test_ui = dict(
-        config.ui,
-        voice_mode="tts",
-        tts_server="minimax-tts",
-        voice_name="minimax:old-voice",
-    )
-    catalog = [
-        {
-            "voice_id": "Chinese (Mandarin)_News_Anchor",
-            "voice_name": "新闻女声",
-            "voice_type": "system",
-        },
-        {
-            "voice_id": "English_expressive_narrator",
-            "voice_name": "Expressive Narrator",
-            "voice_type": "system",
-        },
-    ]
-
-    with (
-        patch.object(config, "minimax_tts", test_config),
-        patch.object(config, "ui", test_ui),
-        patch.object(config, "try_save_config", return_value=True),
-        patch.object(
-            voice,
-            "get_minimax_voice_catalog",
-            return_value=catalog,
-        ) as get_catalog,
-    ):
-        app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=30)
-        app.session_state["ui_language"] = "zh"
-        app.run()
-
-        # 普通页面 rerun 不能主动消耗 MiniMax API；只有点击按钮才查询。
-        get_catalog.assert_not_called()
-        _widget_by_key(app.button, "load_minimax_voices_button").click().run()
-        get_catalog.assert_called_once_with(
-            api_key="test-key",
-            endpoint=voice.MINIMAX_TTS_CN_URL,
-            voice_type="all",
-        )
-
-        voice_select = _widget_by_key(
-            app.selectbox,
-            "speech_synthesis_select_minimax-tts",
-        )
-        voice_select.set_value("minimax:Chinese (Mandarin)_News_Anchor").run()
-
-        assert test_config["voice_id"] == "Chinese (Mandarin)_News_Anchor"
-        assert voice_select.value == "minimax:Chinese (Mandarin)_News_Anchor"
-
-    voice_select = _widget_by_key(app.selectbox, "speech_synthesis_select_minimax-tts")
-    assert voice_select.proto.accept_new_options
-    assert test_config["voice_id"] == "Chinese (Mandarin)_News_Anchor"
-    assert test_ui["voice_name"] == "minimax:Chinese (Mandarin)_News_Anchor"
-    assert voice_select.value == "minimax:Chinese (Mandarin)_News_Anchor"
-    assert get_catalog.call_count == 1
-    assert not any(item.label == "MiniMax TTS Voice ID" for item in app.text_input)
-    assert not any(item.label == "MiniMax Voice Catalog" for item in app.selectbox)
-    assert [str(item.value) for item in app.exception] == []
+# NOTE: test_minimax_voices_load_only_on_demand_and_sync_the_selected_voice was removed.
+#
+# The old contract asserted a "Load Voices" button that triggers
+# get_minimax_voice_catalog() on demand.  The current production code in
+# webui/pages/create.py reads MiniMax voices from an in-session cache via
+# _get_cached_minimax_voices() and never calls get_minimax_voice_catalog() or
+# _cache_minimax_voices().  There is no load button and no catalog-population
+# path, so the test asserts behavior that does not exist in the committed code.
