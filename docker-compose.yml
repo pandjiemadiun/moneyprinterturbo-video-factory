@@ -1,6 +1,3 @@
-x-common-volumes: &common-volumes
-  - ./:/MoneyPrinterTurbo
-
 networks:
   mpt-network:
     driver: bridge
@@ -14,7 +11,9 @@ services:
     ports:
       - "127.0.0.1:8501:8501"
     command: [ "streamlit", "run", "./webui/Main.py", "--server.address=0.0.0.0", "--server.port=8501", "--browser.serverAddress=127.0.0.1", "--server.enableCORS=True", "--browser.gatherUsageStats=False", "--client.toolbarMode=minimal", "--logger.hideWelcomeMessage=True", "--server.showEmailPrompt=False" ]
-    volumes: *common-volumes
+    volumes:
+      - /opt/MoneyPrinterTurbo/config.toml:/MoneyPrinterTurbo/config.toml
+      - /opt/MoneyPrinterTurbo/storage:/MoneyPrinterTurbo/storage
     restart: always
     networks:
       - mpt-network
@@ -28,7 +27,9 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     command: [ "python3", "main.py" ]
-    volumes: *common-volumes
+    volumes:
+      - /opt/MoneyPrinterTurbo/config.toml:/MoneyPrinterTurbo/config.toml
+      - /opt/MoneyPrinterTurbo/storage:/MoneyPrinterTurbo/storage
     restart: always
     networks:
       - mpt-network
