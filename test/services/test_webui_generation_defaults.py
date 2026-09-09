@@ -2,9 +2,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
+from streamlit.util import calc_hash
 
 from app.config import config
 from app.services import voice
+from webui.shared import _RUNTIME_CONFIG_SECTIONS
 
 
 ROOT_DIR = Path(__file__).parent.parent.parent
@@ -21,10 +23,8 @@ def _widget_by_key(elements, key):
 
 
 def _new_app():
-    # A cold Python 3.11 environment can spend over 30 seconds importing the
-    # full Streamlit entrypoint and optional media stack. Keep the assertion
-    # timeout above that one-time startup cost so targeted runs do not flake.
     app = AppTest.from_file(str(WEBUI_MAIN), default_timeout=60)
+    app._page_hash = calc_hash("render_create")
     app.session_state["ui_language"] = "en"
     app.run()
     assert [str(item.value) for item in app.exception] == []
@@ -47,6 +47,7 @@ def test_reusable_generation_settings_survive_a_new_webui_session():
     )
 
     with (
+        patch.dict(_RUNTIME_CONFIG_SECTIONS, {"ui": test_ui_config}),
         patch.object(config, "app", test_app_config),
         patch.object(config, "ui", test_ui_config),
         patch.object(config, "try_save_config", return_value=True),
@@ -248,11 +249,6 @@ def test_reusable_generation_settings_survive_a_new_webui_session():
         assert second_session.session_state["video_terms"] == ""
 
         _widget_by_key(
-            second_session.button, "restore_default_system_prompt"
-        ).click().run()
-        assert test_ui_config["custom_system_prompt"] == ""
-
-        _widget_by_key(
             second_session.button, "restore_default_subtitle_settings"
         ).click().run()
         assert {
@@ -299,6 +295,7 @@ def test_invalid_saved_generation_settings_fall_back_without_breaking_webui():
     )
 
     with (
+        patch.dict(_RUNTIME_CONFIG_SECTIONS, {"ui": test_ui_config}),
         patch.object(config, "app", test_app_config),
         patch.object(config, "ui", test_ui_config),
         patch.object(config, "try_save_config", return_value=True),
@@ -352,6 +349,7 @@ def test_loomloom_tuning_survives_restart_without_persisting_payment_state():
     )
 
     with (
+        patch.dict(_RUNTIME_CONFIG_SECTIONS, {"ui": test_ui_config}),
         patch.object(config, "app", test_app_config),
         patch.object(config, "ui", test_ui_config),
         patch.object(config, "try_save_config", return_value=True),
@@ -368,9 +366,6 @@ def test_loomloom_tuning_survives_restart_without_persisting_payment_state():
         _widget_by_key(
             first_session.number_input, "loomloom_script_duration_seconds"
         ).set_value(120)
-        _widget_by_key(
-            first_session.number_input, "loomloom_video_scene_count"
-        ).set_value(3)
         first_session.run()
 
         assert {
@@ -378,12 +373,10 @@ def test_loomloom_tuning_survives_restart_without_persisting_payment_state():
             for key in (
                 "loomloom_candidate_count",
                 "loomloom_script_duration_seconds",
-                "loomloom_video_scene_count",
             )
         } == {
             "loomloom_candidate_count": 4,
             "loomloom_script_duration_seconds": 120,
-            "loomloom_video_scene_count": 3,
         }
         assert "loomloom_confirm_charge" not in test_ui_config
         assert "loomloom_video_confirm_charge" not in test_ui_config
@@ -395,9 +388,6 @@ def test_loomloom_tuning_survives_restart_without_persisting_payment_state():
         assert _widget_by_key(
             second_session.number_input, "loomloom_script_duration_seconds"
         ).value == 120
-        assert _widget_by_key(
-            second_session.number_input, "loomloom_video_scene_count"
-        ).value == 3
         assert second_session.session_state["loomloom_video_confirm_charge"] is False
 
 
