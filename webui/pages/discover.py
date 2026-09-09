@@ -82,7 +82,7 @@ def render_discover():
 
     # ── Custom topic analysis (secondary, progressive disclosure) ───────────
     with st.expander(tr("Analyze Your Own Topic"), expanded=False):
-        custom_topics = st.text_area(
+        st.text_area(
             tr("Enter Topics One Per Line"), height=80, key="discover_custom_topics",
             placeholder="AI in healthcare\nClimate change\nProductivity hacks",
         )

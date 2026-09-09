@@ -192,7 +192,7 @@ def test_canonical_registry_builds_six_pages_and_five_domains():
     assert [d["icon"] for d in info] == PAGE_ICONS
     assert [d["default"] for d in info] == [True, False, False, False, False, False]
     assert [d["underlying"] for d in info] == PAGE_UNDERLYINGS
-    assert domains == [[l, ps] for l, ps in NAV_DOMAINS_EXPECTED], domains
+    assert domains == [[label, ps] for label, ps in NAV_DOMAINS_EXPECTED], domains
 
 
 PAGE_HASHES = [
