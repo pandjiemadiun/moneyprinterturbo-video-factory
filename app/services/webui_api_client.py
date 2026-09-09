@@ -11,12 +11,36 @@ import httpx
 from loguru import logger
 
 
+def _is_running_in_docker() -> bool:
+    """Detect if running inside a Docker container."""
+    if os.path.exists("/.dockerenv"):
+        return True
+    try:
+        with open("/proc/1/cgroup", "rt") as f:
+            content = f.read()
+            if "docker" in content or "kubepod" in content:
+                return True
+    except (OSError, PermissionError):
+        pass
+    return False
+
+
 def _get_api_base_url() -> str:
     """Get the API base URL.
 
-    When running in Docker, the API is reachable via the container name on the mpt-network.
+    Priority:
+    1. MPT_API_BASE_URL environment variable (explicit override)
+    2. Docker/container default -> canonical Docker service endpoint
+    3. Non-container/local default -> localhost endpoint
     """
-    return os.getenv("MPT_API_BASE_URL", "http://moneyprinterturbo-api:8080")
+    explicit = os.getenv("MPT_API_BASE_URL")
+    if explicit:
+        return explicit
+
+    if _is_running_in_docker():
+        return "http://api:8080"
+
+    return "http://127.0.0.1:8080"
 
 
 def _get_request_id() -> str:

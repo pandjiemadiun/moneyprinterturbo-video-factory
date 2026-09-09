@@ -1,6 +1,10 @@
 x-common-volumes: &common-volumes
   - ./:/MoneyPrinterTurbo
 
+networks:
+  mpt-network:
+    driver: bridge
+
 services:
   webui:
     build:
@@ -12,6 +16,10 @@ services:
     command: [ "streamlit", "run", "./webui/Main.py", "--server.address=0.0.0.0", "--server.port=8501", "--browser.serverAddress=127.0.0.1", "--server.enableCORS=True", "--browser.gatherUsageStats=False", "--client.toolbarMode=minimal", "--logger.hideWelcomeMessage=True", "--server.showEmailPrompt=False" ]
     volumes: *common-volumes
     restart: always
+    networks:
+      - mpt-network
+    environment:
+      - MPT_API_BASE_URL=http://api:8080
   api:
     build:
       context: .
@@ -22,3 +30,5 @@ services:
     command: [ "python3", "main.py" ]
     volumes: *common-volumes
     restart: always
+    networks:
+      - mpt-network
