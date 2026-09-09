@@ -38,12 +38,12 @@ def test_generation_controls_submit_background_task_instead_of_blocking_page():
     这是 Issue #1120 白屏的核心回归保护：只要完整页面脚本再次阻塞在
     ``tm.start``，用户在生成期间刷新时仍可能收到指向旧渲染树的 delta。
     """
-    tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+    tree = ast.parse(ROOT_DIR.joinpath("webui", "pages", "create.py").read_text(encoding="utf-8"))
     function = next(
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef)
-        and node.name == "_render_generation_controls"
+        and node.name == "render_create"
     )
     calls = {
         _attribute_name(node.func)
@@ -51,7 +51,7 @@ def test_generation_controls_submit_background_task_instead_of_blocking_page():
         if isinstance(node, ast.Call)
     }
 
-    assert "webui_task.submit_generation" in calls
+    assert "_handle_generation_submit" in calls
     assert "tm.start" not in calls
 
 
@@ -311,42 +311,39 @@ def test_generation_log_fragment_refreshes_within_half_a_second():
 
 def test_generation_submit_skips_duplicate_config_save():
     """提交任务后不能在页面末尾再次等待配置锁。"""
-    tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
-    controls = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "_render_generation_controls"
-    )
-
-    assert isinstance(controls.body[-1], ast.Return)
-    assert ast.unparse(controls.body[-1].value) == "start_button"
-
+    tree = ast.parse(ROOT_DIR.joinpath("webui", "pages", "create.py").read_text(encoding="utf-8"))
     create_view = next(
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_render_create_view"
+        if isinstance(node, ast.FunctionDef) and node.name == "render_create"
     )
 
-    submitted_assignment = next(
+    start_button_assign = next(
         node
         for node in create_view.body
         if isinstance(node, ast.Assign)
         and any(
-            isinstance(target, ast.Name) and target.id == "generation_submitted"
+            isinstance(target, ast.Name) and target.id == "start_button"
             for target in node.targets
         )
     )
-    assert isinstance(submitted_assignment.value, ast.Call)
-    assert _attribute_name(submitted_assignment.value.func) == (
-        "_render_generation_controls"
+    assert isinstance(start_button_assign.value, ast.Call)
+    assert _attribute_name(start_button_assign.value.func) == "st.button"
+    on_click = next(
+        keyword.value
+        for keyword in start_button_assign.value.keywords
+        if keyword.arg == "on_click"
     )
+    assert _attribute_name(on_click) == "prepare_generation_task"
 
     guarded_save = next(
         node
         for node in create_view.body
         if isinstance(node, ast.If)
-        and ast.unparse(node.test) == "not generation_submitted"
+        and isinstance(node.test, ast.UnaryOp)
+        and isinstance(node.test.op, ast.Not)
+        and isinstance(node.test.operand, ast.Name)
+        and node.test.operand.id == "start_button"
     )
     guarded_calls = {
         _attribute_name(node.func)
