@@ -38,7 +38,7 @@ def _get_api_base_url() -> str:
         return explicit
 
     if _is_running_in_docker():
-        return "http://api:8080"
+        return "http://moneyprinterturbo-api:8080"
 
     return "http://127.0.0.1:8080"
 

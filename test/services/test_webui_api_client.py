@@ -36,14 +36,14 @@ class TestContainerRuntimeDefault:
     def test_docker_runtime_uses_canonical_service(self):
         with patch.dict(os.environ, {}, clear=True), \
              patch("app.services.webui_api_client._is_running_in_docker", return_value=True):
-            assert _get_api_base_url() == "http://api:8080"
+            assert _get_api_base_url() == "http://moneyprinterturbo-api:8080"
 
     def test_docker_runtime_ignores_old_hostname(self):
         with patch.dict(os.environ, {}, clear=True), \
              patch("app.services.webui_api_client._is_running_in_docker", return_value=True):
             url = _get_api_base_url()
-            assert "moneyprinterturbo-api" not in url
-            assert url == "http://api:8080"
+            assert url == "http://moneyprinterturbo-api:8080"
+            assert url != "http://api:8080"
 
 
 class TestLocalRuntimeDefault:

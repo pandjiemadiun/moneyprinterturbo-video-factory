@@ -18,7 +18,7 @@ services:
     networks:
       - mpt-network
     environment:
-      - MPT_API_BASE_URL=http://api:8080
+      - MPT_API_BASE_URL=http://moneyprinterturbo-api:8080
   api:
     build:
       context: .
