@@ -342,7 +342,7 @@ def test_discover_filters_responsive_no_starved_selectboxes():
     assert "st-key-discover_filters" in css, ".mpt-filter-row CSS rule missing"
     assert "flex-wrap: wrap" in css, "filter-row must flex-wrap"
     # (3) runtime: the three filter selectboxes still render (no data loss;
-    # Discover's initial render is network-free -- uses static recommended data)
+    # Discover's initial render is an honest empty state with no fake data)
     at = _load_main()
     at._page_hash = calc_hash("render_discover")
     at.run()
@@ -637,3 +637,31 @@ def test_create_is_production_workspace():
     assert "_render_selected_opportunity_banner" in src
     labels = [getattr(b, "label", "") for b in at.button]
     assert any("Launch Production" in lbl for lbl in labels), f"Launch button missing: {labels}"
+
+
+def test_discover_has_no_hardcoded_fake_recommendations():
+    """Discover page must not contain hardcoded fake opportunities presented as real trends."""
+    src = _read(WEBUI / "pages" / "discover.py")
+    # _DEFAULT_RECOMMENDED must not exist — it was a Category A production defect
+    # that showed fabricated topics (Quantum Espresso, Neon Sign Making, etc.)
+    # as if they were live content opportunities.
+    assert "_DEFAULT_RECOMMENDED" not in src, "hardcoded _DEFAULT_RECOMMENDED list must be removed"
+    # Specific fake topic names must not appear in production code
+    for fake_topic in (
+        "Quantum Espresso Machines",
+        "Neon Sign Making",
+        "Urban Beekeeping",
+        "Analog Synth Sound Design",
+        "Folding Bike Travel",
+    ):
+        assert fake_topic not in src, f"fake topic '{fake_topic}' must not appear in discover.py"
+    # The empty-state path must reference real signal sources
+    assert "Google News" in src or "Hacker News" in src or "real-world signals" in src.lower(), (
+        "Discover empty state must reference real signal sources"
+    )
+    # The empty state must invite the user to fetch live data or analyze topics
+    assert "Fetch Live Trends" in src, "Discover must have 'Fetch Live Trends' button"
+    # _render_recommended_opportunities must not exist
+    assert "_render_recommended_opportunities" not in src, (
+        "_render_recommended_opportunities function must be removed"
+    )

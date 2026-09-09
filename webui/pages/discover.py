@@ -1,14 +1,16 @@
 """
 Discover page — "What should I make?"
 
-Opportunity-first design. On first load the page shows a deterministic set of
-recommended, production-vetted content opportunities (each pre-checked for
-Pexels/Pixabay/Coverr footage availability) — NO external network call on load.
-Refreshing / fetching live trend data and analyzing a custom topic are explicit
-user actions hidden behind progressive disclosure.
+Opportunity-first design. On first load the page shows an honest empty state
+that explains the page purpose and invites the user to either fetch live trends
+from real signal sources (Google News RSS, Hacker News) or analyze their own
+topics. No fake or hardcoded recommendations are ever shown as live trends.
 
-Each opportunity card is a production gate (TREND -> OPPORTUNITY ->
-VISUAL FEASIBILITY -> PRODUCTION) and exposes the two primary actions:
+Fetching live data and analyzing custom topics are explicit user actions.
+
+Each opportunity card produced from real data is a production gate
+(TREND -> OPPORTUNITY -> VISUAL FEASIBILITY -> PRODUCTION) and exposes
+the two primary actions:
 Review (inspect before producing) and Create Video (prefill + navigate).
 
 Prefill contract (preserved):
@@ -31,93 +33,7 @@ from webui.shared import (
 )
 
 
-# ── Curated recommended opportunities (deterministic, no network on load) ──
-# Each dict matches the item schema consumed by Review + Create so the prefill
-# contract is satisfied end-to-end. Footage providers are pre-checked: every
-# recommended topic has available Pexels/Pixabay/Coverr footage.
-_DEFAULT_RECOMMENDED = [
-    {
-        "topic": "Quantum Espresso Machines",
-        "proposed_hook": "Why your morning espresso tastes better at 9 bars of pressure.",
-        "angle": "Modern espresso machines extract flavor using 9 bars of pressure.",
-        "content_promise": "Understand the engineering behind café-quality espresso at home.",
-        "format": "Explainer",
-        "score_total": 0.91,
-        "confidence": 0.88,
-        "freshness": 0,
-        "keywords": ["espresso machine", "coffee", "brewing", "9 bars"],
-        "providers": ["Pexels", "Pixabay"],
-        "visual_feasibility": "High",
-        "feasibility_note": "Abundant free machine + brewing footage on Pexels/Pixabay.",
-        "sources": ["goldtrader.website content-intelligence"],
-        "evidence": ["espresso extraction trending on footage platforms"],
-    },
-    {
-        "topic": "Neon Sign Making",
-        "proposed_hook": "Turning glass tubes into glowing art — one bend at a time.",
-        "angle": "The craft of bending glass tubes into illuminated lettering.",
-        "content_promise": "See how raw glass becomes custom neon signs.",
-        "format": "How-to",
-        "score_total": 0.87,
-        "confidence": 0.82,
-        "freshness": 12,
-        "keywords": ["neon sign", "glass bending", "lighting", "DIY"],
-        "providers": ["Pexels", "Coverr"],
-        "visual_feasibility": "High",
-        "feasibility_note": "Strong raw footage of glass bending + neon workshops.",
-        "sources": ["goldtrader.website content-intelligence"],
-        "evidence": ["neon workshop footage popular on Pexels"],
-    },
-    {
-        "topic": "Urban Beekeeping",
-        "proposed_hook": "Keeping bees on rooftops — honey without the countryside.",
-        "angle": "City rooftop beekeeping as sustainable urban food.",
-        "content_promise": "How urban beekeepers turn rooftops into hives.",
-        "format": "Vlog",
-        "score_total": 0.83,
-        "confidence": 0.79,
-        "freshness": 48,
-        "keywords": ["urban beekeeping", "honey", "rooftop farming", "sustainability"],
-        "providers": ["Pexels", "Pixabay"],
-        "visual_feasibility": "Medium",
-        "feasibility_note": "Stock footage of hives + honey extraction widely available.",
-        "sources": ["goldtrader.website content-intelligence"],
-        "evidence": ["urban farming content trending"],
-    },
-    {
-        "topic": "Analog Synth Sound Design",
-        "proposed_hook": "From voltage to voice — what makes a synth sing.",
-        "angle": "The physics and craft of analog synthesizer sound.",
-        "content_promise": "Create haunting textures using vintage analog synths.",
-        "format": "Tutorial",
-        "score_total": 0.80,
-        "confidence": 0.85,
-        "freshness": 72,
-        "keywords": ["analog synth", "sound design", "vintage", "music production"],
-        "providers": ["Pixabay", "Coverr"],
-        "visual_feasibility": "Medium",
-        "feasibility_note": "Studio gear footage available; hands-on sequences stocked.",
-        "sources": ["gold trader.website content-intelligence"],
-        "evidence": ["synth gear footage popular"],
-    },
-    {
-        "topic": "Folding Bike Travel",
-        "proposed_hook": "A bike that fits in a train — the key to city-hopping.",
-        "angle": "How folding bikes unlock multimodal travel.",
-        "content_promise": "Pack light, travel far with a foldable two-wheeler.",
-        "format": "Travel",
-        "score_total": 0.78,
-        "confidence": 0.75,
-        "freshness": 120,
-        "keywords": ["folding bike", "travel", "train", "urban mobility"],
-        "providers": ["Pexels"],
-        "visual_feasibility": "High",
-        "feasibility_note": "Travel + bike footage abundant on Pexels.",
-        "sources": ["goldtrader.website content-intelligence"],
-        "evidence": ["folding bike travel content active"],
-    },
-]
-
+# ── Filter options ─────────────────────────────────────────────────────
 _GEOGRAPHIES = ["ID", "US", "GB", "AU", "MY", "SG"]
 _LANGUAGES = ["id", "en"]
 _CATEGORIES = ["general", "technology", "business", "sports", "entertainment", "health", "science"]
@@ -177,10 +93,19 @@ def render_discover():
     result = st.session_state.get("discover_result")
 
     if result is None:
-        _render_recommended_opportunities()
+        st.markdown(
+            "<div style='text-align:center; padding: 2rem 1rem;'>"
+            "<p style='font-size:1.1rem; color:#475569;'>"
+            "Discover content opportunities backed by real-world signals and "
+            "verified visual feasibility."
+            "</p>"
+            "<p style='color:#64748b; margin-top:0.5rem;'>"
+            "Fetch live trends from Google News and Hacker News, or analyze your own topics."
+            "</p></div>",
+            unsafe_allow_html=True,
+        )
         st.divider()
-        st.caption("Showing recommended production-ready topics. Fetch live data to personalize.")
-        if st.button(tr("Fetch Live Trends"), key="discover_fetch_empty", type="secondary", use_container_width=True, icon=":material/refresh:"):
+        if st.button(tr("Fetch Live Trends"), key="discover_fetch_empty", type="primary", use_container_width=True, icon=":material/refresh:"):
             _fetch_opportunities(geo, language, category)
         return
 
@@ -254,13 +179,6 @@ def _render_raw_intelligence(result):
             for i, pattern in enumerate(patterns[:5]):
                 st.markdown(f"**{pattern.get('name', 'Unknown')}** — {pattern.get('pattern_type', 'N/A')}")
                 st.caption(pattern.get("description", "N/A"))
-
-
-def _render_recommended_opportunities():
-    """Deterministic, network-free recommended opportunities (first-load state)."""
-    st.subheader(tr("Recommended Opportunities"))
-    for i, item in enumerate(_DEFAULT_RECOMMENDED):
-        _render_opportunity_card(item, i, "recommendation")
 
 
 def _render_opportunity_card(item, index, item_type):
