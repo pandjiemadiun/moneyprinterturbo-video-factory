@@ -98,16 +98,6 @@ def _server_reachable(url: str, timeout: float = 2.0) -> bool:
 
 @pytest.fixture(scope="module")
 def local_webui():
-    # Reuse a running instance when available (dev or prod), so the test always
-    # exercises the SAME code that the user sees. Only fall back to launching a
-    # fresh working-tree Streamlit when nothing is live.
-    env_url = os.environ.get("MPT_WEBUI_URL")
-    if env_url and _server_reachable(env_url):
-        yield env_url; return
-    for candidate in ("http://127.0.0.1:8501", "http://127.0.0.1:8502"):
-        if _server_reachable(candidate):
-            yield candidate; return
-
     port = _free_port()
     storage = "/tmp/mpt_custom_provider_test_storage"
     os.makedirs(storage, exist_ok=True)
