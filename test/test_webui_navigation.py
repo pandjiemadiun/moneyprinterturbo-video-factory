@@ -206,7 +206,10 @@ PAGE_HASHES = [
 
 
 @pytest.mark.parametrize("label,page_hash,expect_button", PAGE_HASHES)
-def test_all_six_pages_load_without_exception(label, page_hash, expect_button):
+def test_all_six_pages_load_without_exception(label, page_hash, expect_button, monkeypatch):
+    if label == "Library":
+        from webui.pages import library as library_mod
+        monkeypatch.setattr(library_mod, "collect_task_summaries", lambda limit=20: [])
     at = _load_main()
     if page_hash:
         at._page_hash = calc_hash(page_hash)
