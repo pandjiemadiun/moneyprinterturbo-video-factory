@@ -374,7 +374,7 @@ class TestCustomProviderE2E:
             _open_llm_settings(page, webui_url)
 
             # (steps 4-6) Select Custom, fill Name/Base URL/API Key, discover.
-            base_url = _configure_custom_provider(
+            _configure_custom_provider(
                 page, mock_openai_server.server_address[1], TEST_SECRET
             )
 

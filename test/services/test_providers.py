@@ -3,12 +3,11 @@
 Tests provider contracts, parsing, health monitoring, and failure handling.
 """
 
-import json
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -18,7 +17,6 @@ from app.services.content_intelligence.models import (
 )
 from app.services.content_intelligence.provider_base import (
     ContentProvider,
-    ProviderCapability,
     ProviderHealth,
     ProviderStatus,
     Freshness,

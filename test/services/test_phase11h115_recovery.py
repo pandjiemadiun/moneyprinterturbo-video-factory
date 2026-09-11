@@ -28,7 +28,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
@@ -119,7 +118,6 @@ class TestNavigationStateChangeRegression:
         """No widget uses key='nav_view' in the new architecture."""
         for path in (WEBUI_MAIN, WEBUI_SHARED, WEBUI_PAGES_LIBRARY, WEBUI_NAV_SHELL):
             tree = ast.parse(path.read_text(encoding="utf-8"))
-            source = path.read_text(encoding="utf-8")
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                     if node.func.attr in ("segmented_control", "selectbox", "radio"):

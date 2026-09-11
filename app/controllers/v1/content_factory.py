@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Depends, Request
@@ -72,7 +71,6 @@ def _build_assessment_from_request(body: Any) -> Any:
     """
     from app.services.visual_opportunity.models import (
         VisualConcept,
-        VisualFeasibilityStatus,
         VisualFeasibilityScore,
         VisualOpportunityAssessment,
     )

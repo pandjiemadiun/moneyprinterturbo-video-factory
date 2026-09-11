@@ -1,9 +1,7 @@
 """Tests for landscape-to-portrait reframing."""
 
 import os
-import tempfile
 import pytest
-from unittest.mock import patch, MagicMock
 from app.services.material import (
     _can_reframe_to_portrait,
     _reframe_landscape_to_portrait,

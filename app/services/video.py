@@ -14,7 +14,6 @@ from loguru import logger
 import numpy as np
 from moviepy import (
     AudioFileClip,
-    ColorClip,
     CompositeAudioClip,
     CompositeVideoClip,
     ImageClip,
@@ -35,7 +34,6 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
-from app.services import reframe
 from app.services.utils import video_effects
 from app.utils import file_security, utils
 

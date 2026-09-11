@@ -2,10 +2,8 @@ import os
 import random
 import re
 import shutil
-import subprocess
 import threading
 import time
-import asyncio
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 from urllib.parse import quote_plus, urlencode, urlparse, urlunsplit, parse_qs, urlsplit
@@ -938,8 +936,6 @@ def search_videos_youtube(
     if yt_dlp is None:
         logger.error("yt_dlp is not installed; YouTube provider unavailable")
         return []
-
-    aspect = VideoAspect(video_aspect)
 
     ydl_opts = {
         "quiet": True,
@@ -1879,7 +1875,7 @@ def _fetch_po_token_via_browser(video_url: str) -> Optional[str]:
             finally:
                 await browser.quit()
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(_extract())
         else:
@@ -1960,7 +1956,6 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
     attempts.append(("direct", None))
     attempts = attempts[:max_attempts]
 
-    last_error = ""
     for attempt_label, provider_url in attempts:
         if attempt_label == "bgutil":
             po_token = _fetch_po_token_from_provider(provider_url)
@@ -1974,7 +1969,6 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
             if saved_path:
                 return saved_path
             _record_youtube_failure("provider_pot_failed", error)
-            last_error = error
         elif attempt_label == "browser":
             browser_po_token = _fetch_po_token_via_browser(video_url)
             if browser_po_token is None:
@@ -1987,7 +1981,6 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
             if saved_path:
                 return saved_path
             _record_youtube_failure("ytdlp_browser_failed", error)
-            last_error = error
         elif attempt_label == "direct":
             saved_path, error = _run_youtube_download_attempt(
                 video_url, video_path, player_client=player_client,
@@ -1996,7 +1989,6 @@ def save_video_youtube(video_url: str, save_dir: str = "") -> str:
             if saved_path:
                 return saved_path
             _record_youtube_failure("generic_download_error", error)
-            last_error = error
 
     _cleanup_failed_youtube_download(video_path, created_before=_existed_before)
     return ""

@@ -132,7 +132,6 @@ def compute_portrait_readiness_score(
     if total_usable <= 0:
         return 0.0
     portrait_ratio = total_native_portrait / total_usable
-    reframable_ratio = total_reframable_landscape / total_usable
 
     # Strong native portrait coverage is ideal
     native_score = min(1.0, total_native_portrait / 6.0)

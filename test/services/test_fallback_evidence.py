@@ -3,9 +3,7 @@ Deterministic provider fallback verification tests with actual call-order eviden
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
-import tempfile
-import os
+from unittest.mock import patch
 
 from app.models.schema import MaterialInfo, VideoAspect
 from app.services.material import download_videos_by_scene

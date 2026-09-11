@@ -14,7 +14,6 @@ import os
 import sys
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -24,8 +23,6 @@ from app.services import material
 from app.services.material import (
     cleanup_orphan_cache_videos,
     _get_active_cache_references,
-    _PROTECTED_FILENAMES,
-    _CACHE_VIDEOS_FILE_PATTERNS,
 )
 
 

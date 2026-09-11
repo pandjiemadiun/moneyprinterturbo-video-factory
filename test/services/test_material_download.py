@@ -2,7 +2,6 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from app.services.material import rank_videos
 from app.models.schema import VideoAspect
 
 

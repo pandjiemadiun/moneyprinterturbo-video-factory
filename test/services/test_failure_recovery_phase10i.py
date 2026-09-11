@@ -24,10 +24,7 @@ from app.services import material
 from app.services.material import (
     _validate_downloaded_clip,
     cleanup_orphan_cache_videos,
-    _get_active_cache_references,
     save_video_youtube,
-    download_videos_by_scene,
-    _PROTECTED_FILENAMES,
 )
 from app.services.video import combine_videos, delete_files
 from app.models.schema import MaterialInfo, VideoAspect
@@ -51,7 +48,7 @@ def _make_mp4(path: Path, w: int, h: int, duration: float = 1.0, rate: int = 15)
 def _make_silence(path: Path, seconds: float = 3.0):
     subprocess.run(
         [
-            FFMPEG, "-y", "-f", "lavfi", "-i", f"anullsrc=r=16000:cl=mono",
+            FFMPEG, "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
             "-t", str(seconds), "-acodec", "pcm_s16le", str(path),
         ],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

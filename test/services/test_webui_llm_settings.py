@@ -1,10 +1,6 @@
 from pathlib import Path
-from unittest.mock import patch
 
-from streamlit.testing.v1 import AppTest
 
-from app.config import config
-from app.services import llm
 
 
 ROOT_DIR = Path(__file__).parent.parent.parent

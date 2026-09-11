@@ -9,7 +9,7 @@ Orchestrates the complete flow:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Callable, Optional
 
 from loguru import logger
@@ -24,7 +24,6 @@ from app.services.content_intelligence.models import (
     _utcnow,
 )
 from app.services.content_intelligence.provider_base import (
-    ContentProvider,
     ProviderHealth,
 )
 from app.services.content_intelligence.trend_radar import TrendRadar

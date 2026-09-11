@@ -27,7 +27,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
@@ -216,7 +215,6 @@ def _extract_frame(video_path: str, t: float, w: int, h: int):
     if not proc.stdout:
         return None
     try:
-        import cv2
         import numpy as np
         arr = np.frombuffer(proc.stdout, dtype=np.uint8)
         frame = arr.reshape((h, w, 3))

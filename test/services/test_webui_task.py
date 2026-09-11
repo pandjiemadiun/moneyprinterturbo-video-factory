@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from loguru import logger
 
 from app.models import const
 from app.models.schema import VideoParams

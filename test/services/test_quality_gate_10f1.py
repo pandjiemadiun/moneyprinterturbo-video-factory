@@ -11,7 +11,6 @@ Key question: Can a candidate with resolution UNKNOWN at search time
 """
 
 import unittest
-from unittest.mock import MagicMock
 
 from app.models.schema import MaterialInfo, VideoAspect
 from app.services import material as mat

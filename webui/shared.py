@@ -9,15 +9,12 @@ import hashlib
 import html
 import json
 import math
-import mimetypes
 import os
 import re
 import sys
-import time
 import webbrowser
 from collections.abc import Mapping
 from datetime import datetime
-from pathlib import Path
 from uuid import UUID, uuid4
 
 import requests
@@ -34,10 +31,8 @@ sys.path.insert(0, root_dir)
 from app.config import config
 from app.models import const
 from app.models.llm_provider import (
-    DEFAULT_LLM_PROVIDER_ID,
     LLM_PROVIDER_REGISTRY,
     get_llm_provider,
-    normalize_provider_override,
 )
 from app.models.schema import (
     MaterialInfo,
@@ -46,12 +41,11 @@ from app.models.schema import (
     VideoParams,
     VideoTransitionMode,
 )
-from app.services import bgm as bgm_service
 from app.services import (
+    bgm as bgm_service,
     cache_manager,
     llm,
     loomloom,
-    video,
     voice,
     webui_api_client,
     webui_task,
@@ -59,10 +53,6 @@ from app.services import (
 from app.services import elevenlabs_music as elevenlabs_music_service
 from app.services import sonilo as sonilo_service
 from app.services import task as tm
-from app.services import version_checker
-from app.services import webui_batch
-from app.services import elevenlabs_music
-from app.services import sonilo
 from app.utils.logging_utils import configure_terminal_logger
 from app.utils import utils
 
@@ -1145,7 +1135,6 @@ def render_generation_task_snapshot(task_id, task):
                 download_label = tr("Download Video")
                 if len(video_files) > 1:
                     download_label = f"{download_label} {i + 1}"
-                download_name = build_video_download_name(task.get("video_subject"), i + 1, len(video_files))
                 filename = os.path.basename(url)
                 download_url = f"/api/v1/download/{task_id}/{filename}"
                 st.link_button(download_label, url=download_url, key=f"download_generated_video_{task_id}_{i}", icon=":material/download:", use_container_width=True, help=download_label)

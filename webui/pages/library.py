@@ -15,11 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from webui.nav_shell import render_nav_shell
 
 from webui.shared import (
-    tr, collect_task_summaries, task_state_filter_key, format_task_time, format_task_subject,
-    delete_task, open_task_path, open_task_video, build_video_download_name,
-    count_processing_tasks, task_manager_label,
-    webui_api_client, webui_batch,
-    const, tm, render_metrics_grid,
+    collect_task_summaries, task_state_filter_key, format_task_time, open_task_path, webui_api_client, const, render_metrics_grid,
 )
 
 
@@ -184,8 +180,6 @@ def _render_task_card(task, status_key):
         with st.container(key=f"card_actions_{status_key}_{task_id}"):
             video_file = task.get("video_file", "")
             has_video = bool(video_file) and os.path.isfile(video_file)
-            is_processing = task_state_filter_key(task) == "processing"
-            is_busy = is_processing or tm.is_task_busy(task)
 
             if state == const.TASK_STATE_QUEUED:
                 if st.button("✕ Cancel", key=f"task_cancel_{status_key}_{task_id}",

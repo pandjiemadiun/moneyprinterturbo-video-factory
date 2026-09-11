@@ -12,7 +12,6 @@ Data source: Google News RSS (https://news.google.com/rss)
 
 from __future__ import annotations
 
-import re
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -245,7 +244,6 @@ class GoogleNewsProvider(ContentProvider):
                 link_elem = item.find("link")
                 pub_date_elem = item.find("pubDate")
                 source_elem = item.find("source")
-                description_elem = item.find("description")
 
                 title = _extract_cdata(title_elem.text) if title_elem is not None and title_elem.text else ""
                 if not title:

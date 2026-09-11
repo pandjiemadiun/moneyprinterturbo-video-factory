@@ -12,7 +12,6 @@ G. Regression tests for discovered bugs
 
 import json
 import sys
-import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,9 +22,7 @@ from app.services.content_intelligence.models import (
     ContentHypothesis,
     ContentOpportunity,
     DimensionScore,
-    NormalizedSignal,
     OpportunityScore,
-    PatternEvidence,
     RawSignal,
     ScoreDimension,
     Trend,
@@ -41,7 +38,6 @@ from app.services.content_intelligence.trend_radar import (
 from app.services.content_intelligence.opportunity_miner import OpportunityMiner
 from app.services.content_intelligence.viral_analyzer import ViralAnalyzer
 from app.services.content_intelligence.scorer import (
-    DEFAULT_WEIGHTS,
     OpportunityScorer,
     _normalize_weights,
 )
@@ -1136,16 +1132,8 @@ class TestRegressionBugFixes(unittest.TestCase):
         result = PipelineResult()
         self.assertTrue(result.success)
 
-    def test_pipeline_result_top_hypothesis_empty(self):
+    def test_pipeline_result_top_hypothesis_none_when_empty(self):
         """top_hypothesis returns None when no hypotheses."""
-        result = PipelineResult()
-        self.assertIsNone(result.top_hypothesis)
-
-
-    def test_pipeline_result_top_hypothesis_empty(self):
-        """top_hypothesis returns None when no hypotheses."""
-        result = PipelineResult()
-        self.assertIsNone(result.top_hypothesis)
 
 
 # ===========================================================================
@@ -1390,7 +1378,6 @@ class TestNoFakeData(unittest.TestCase):
 
     def test_no_hardcoded_trends(self):
         """Verify no hardcoded trends in production code."""
-        import ast
         import inspect
         from app.services.content_intelligence import pipeline
         source = inspect.getsource(pipeline)

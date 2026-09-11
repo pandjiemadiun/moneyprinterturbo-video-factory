@@ -13,7 +13,6 @@ H. No fabricated data
 
 import sys
 import unittest
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,24 +21,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from app.services.visual_opportunity.models import (
     CandidateRejectionReason,
     ProviderAvailability,
-    VisualCandidate,
     VisualConcept,
     VisualFeasibilityScore,
     VisualFeasibilityStatus,
     VisualOpportunityAssessment,
 )
 from app.services.visual_opportunity.query_generator import (
-    _extract_meaningful_terms,
-    _canonicalize,
     generate_visual_queries,
 )
 from app.services.visual_opportunity.scorer import (
     DEFAULT_WEIGHTS,
     apply_production_gate,
     compute_provider_diversity_score,
-    compute_portrait_readiness_score,
     compute_quantity_score,
-    compute_scene_diversity_score,
     compute_visual_feasibility,
 )
 from app.services.visual_opportunity.provider_probe import (
@@ -47,7 +41,6 @@ from app.services.visual_opportunity.provider_probe import (
     _extract_dimensions,
 )
 from app.services.visual_opportunity.engine import (
-    VisualOpportunityEngine,
     create_visual_opportunity_engine,
 )
 from app.models.schema import MaterialInfo

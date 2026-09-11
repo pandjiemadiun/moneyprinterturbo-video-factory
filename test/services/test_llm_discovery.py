@@ -20,7 +20,6 @@ from app.services.llm_discovery import (
     CATEGORY_UNKNOWN,
     CATEGORY_UNSUPPORTED,
     DEFAULT_DISCOVERY_TIMEOUT,
-    DiscoveryResult,
     discover_models,
     normalize_base_url,
     normalize_model_id,

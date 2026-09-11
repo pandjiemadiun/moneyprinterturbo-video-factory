@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app.models.schema import ScenePlan, VideoParams, VideoAspect, VideoConcatMode
+from app.models.schema import ScenePlan, VideoParams, VideoConcatMode
 
 
 def test_scene_plan_fields_and_default_duration():

@@ -12,8 +12,6 @@ from typing import Any
 
 from app.services.visual_opportunity.models import (
     ProviderAvailability,
-    VisualConcept,
-    VisualFeasibilityStatus,
     VisualOpportunityAssessment,
 )
 from app.services.visual_opportunity.provider_probe import (

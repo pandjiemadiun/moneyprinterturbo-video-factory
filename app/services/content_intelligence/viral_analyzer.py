@@ -28,7 +28,6 @@ from loguru import logger
 
 from app.services.content_intelligence.models import (
     ContentOpportunity,
-    NormalizedSignal,
     PatternEvidence,
     Trend,
     ViralPattern,

@@ -4,7 +4,6 @@ Test-first development for YouTube UX improvements.
 Uses isolated mocks/fixtures, no production network calls.
 """
 
-import os
 import sys
 import unittest
 from pathlib import Path

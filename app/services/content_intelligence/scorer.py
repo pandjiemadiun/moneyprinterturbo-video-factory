@@ -19,7 +19,6 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from loguru import logger
 
 from app.services.content_intelligence.models import (
     ContentOpportunity,

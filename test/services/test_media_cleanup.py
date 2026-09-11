@@ -11,13 +11,11 @@ DO NOT touch production cache_videos/.
 """
 
 import os
-import re
 import sys
 import time
 import shutil
 import tempfile
 import unittest
-from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
@@ -207,11 +205,9 @@ class TestTempClipCleanupHardening(unittest.TestCase):
         Path(clip1).write_bytes(b"clip 1")
         Path(clip2).write_bytes(b"clip 2")
 
-        combined_path = os.path.join(self.tmpdir, "combined-1.mp4")
-
         with (
             patch.object(vd, "AudioFileClip") as mock_audio,
-            patch.object(vd, "concat_video_clips_with_ffmpeg") as mock_concat,
+            patch.object(vd, "concat_video_clips_with_ffmpeg"),
         ):
             mock_audio.return_value = SimpleNamespace(duration=30, close=MagicMock())
 

@@ -3,11 +3,9 @@ from collections import deque
 
 from loguru import logger
 
-from app.config import config
 from app.models.schema import VideoParams
 from app.services.loomloom import LoomLoomConfirmedVideoRequest
 from app.services import webui_api_client
-from app.utils.logging_utils import format_log_record
 
 
 # WebUI no longer owns task state or a TaskManager.

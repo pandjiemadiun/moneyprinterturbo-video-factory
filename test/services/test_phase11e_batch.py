@@ -1,12 +1,10 @@
 """Phase 11E — Batch service tests (updated for API client architecture)."""
 
-import ast
 import json
-import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 

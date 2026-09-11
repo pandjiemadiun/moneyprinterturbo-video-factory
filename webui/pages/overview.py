@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from webui.nav_shell import render_nav_shell
 
 from webui.shared import (
-    tr, const,
+    const,
     format_file_size, format_task_time, format_task_subject,
     normalize_task_state, task_state_label,
     get_dashboard_state, get_storage_usage, collect_task_summaries,

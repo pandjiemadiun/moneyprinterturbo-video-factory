@@ -9,11 +9,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app.config import config
 from app.models import const as model_const
 from app.services import video, task
 

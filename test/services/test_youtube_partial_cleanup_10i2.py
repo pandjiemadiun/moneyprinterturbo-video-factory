@@ -253,14 +253,12 @@ def test_defect2_cleanup_failure_is_non_fatal(tmp_path, monkeypatch):
     and logs a warning. It must NOT return a false success."""
     save_dir = str(tmp_path)
     video_url = "https://www.youtube.com/watch?v=FAILVID0006"
-    vid_hash = _canonical_vid_hash(video_url)
 
     mock_ydl = _make_mock_ydl_download_error(
         create_partial=True, save_dir=save_dir, video_url=video_url
     )
 
     # Patch os.remove to fail, simulating cleanup failure
-    real_remove = os.remove
 
     def boom_remove(path):
         raise OSError("permission denied")

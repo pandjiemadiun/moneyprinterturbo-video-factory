@@ -9,7 +9,6 @@ from datetime import datetime
 
 from loguru import logger
 
-from app.config import config
 from app.models.schema import VideoParams
 from app.services import webui_api_client
 

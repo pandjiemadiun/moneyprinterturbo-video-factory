@@ -8,7 +8,6 @@ so repeated word sequences map to the correct occurrence) and derive
 (scene_index, start, end, duration) from ACTUAL TTS timing — never word count,
 never target_duration, never SRT-cue count.
 """
-import re
 import sys
 from datetime import timedelta
 from pathlib import Path

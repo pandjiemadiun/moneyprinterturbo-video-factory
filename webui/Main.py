@@ -18,7 +18,6 @@ sys.path.insert(0, root_dir)
 import streamlit as st
 from pathlib import Path
 
-from app.config import config
 
 # ── Page config (must be first Streamlit call) ──────────────────────────────
 st.set_page_config(

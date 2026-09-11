@@ -4,16 +4,15 @@ TDD: These tests must FAIL before implementation.
 Tests cover batch UI contract, thumbnail display, mobile CSS, and provider parity.
 """
 
-import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.models import const
-from app.models.schema import VideoParams, VideoAspect
+from app.models.schema import VideoParams
 from app.services import webui_batch
 
 

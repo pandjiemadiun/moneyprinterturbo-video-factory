@@ -157,7 +157,7 @@ def discover_models(
             error_message=("Could not connect to the provider while discovering "
                            f"models: {hint}"),
         )
-    except requests.exceptions.RequestException as exc:
+    except requests.exceptions.RequestException:
         return DiscoveryResult(
             ok=False,
             error_category=CATEGORY_NETWORK,

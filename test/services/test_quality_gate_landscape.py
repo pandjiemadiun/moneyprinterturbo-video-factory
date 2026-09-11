@@ -22,8 +22,6 @@ What this test suite verifies:
 5. REGRESSION: Existing valid sources remain valid; tiny sources remain invalid.
 """
 
-import json
-import math
 import os
 import shutil
 import subprocess

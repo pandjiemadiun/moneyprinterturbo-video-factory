@@ -81,7 +81,10 @@ def _find_yellow_bbox(frame_bytes: bytes, w: int, h: int):
     """
     px_size = w * h
     step = max(1, px_size // 10000)  # sample ~10000 pixels for speed
-    min_x = w; min_y = h; max_x = 0; max_y = 0
+    min_x = w
+    min_y = h
+    max_x = 0
+    max_y = 0
     found = False
     for i in range(0, px_size, step):
         r = frame_bytes[i * 3]

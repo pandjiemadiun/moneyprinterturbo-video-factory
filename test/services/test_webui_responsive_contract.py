@@ -29,7 +29,8 @@ def _ast_call(node, attr_path):
     f = node.func
     parts = []
     while isinstance(f, ast.Attribute):
-        parts.append(f.attr); f = f.value
+        parts.append(f.attr)
+        f = f.value
     if isinstance(f, ast.Name):
         parts.append(f.id)
     parts = list(reversed(parts))
@@ -96,7 +97,8 @@ def _active_css(css: str) -> str:
             end = css.find("*/", i+2)
             i = end + 2 if end != -1 else len(css)
         else:
-            out.append(css[i]); i += 1
+            out.append(css[i])
+            i += 1
     return "".join(out)
 
 

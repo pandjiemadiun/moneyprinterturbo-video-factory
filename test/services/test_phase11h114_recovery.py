@@ -11,12 +11,9 @@ These tests prove actual behaviour, not just code existence:
 """
 
 import ast
-import json
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
@@ -317,7 +314,6 @@ class TestClearOperations:
         assert "errors" in result
 
     def test_clear_buttons_use_api_client(self):
-        tree = ast.parse(WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8"))
         source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
         # Verify the 5 clear buttons are present
         assert 'btn_clear_completed' in source
@@ -472,7 +468,6 @@ class TestNavigationCanonicalState:
         webui/pages/library.py. Verify navigation uses st.switch_page with
         page objects."""
         source = WEBUI_PAGES_LIBRARY.read_text(encoding="utf-8")
-        tree = ast.parse(source)
         assert "st.switch_page" in source
         assert 'st.session_state["nav_view"] = "create"' not in source
 

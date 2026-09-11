@@ -23,7 +23,12 @@ Server handling:
 """
 from __future__ import annotations
 
-import os, sys, time, socket, subprocess, signal
+import os
+import sys
+import time
+import socket
+import subprocess
+import signal
 
 from pathlib import Path
 
@@ -45,13 +50,17 @@ PRACTICAL_MIN_WIDTH = 250  # px: wide enough for a tappable selectbox / input
 
 def _free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close(); return port
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
 
 
 def _server_reachable(url: str, timeout: float = 1.5) -> bool:
     from urllib.request import urlopen
     try:
-        urlopen(url + "/render_settings", timeout=timeout); return True
+        if urlopen(url + "/render_settings", timeout=timeout):
+            return True
     except Exception:
         return False
 
@@ -60,9 +69,11 @@ def _server_reachable(url: str, timeout: float = 1.5) -> bool:
 def webui_server():
     env_url = os.environ.get("MPT_WEBUI_URL")
     if env_url and _server_reachable(env_url):
-        yield env_url; return
+        yield env_url
+        return
     if _server_reachable("http://127.0.0.1:8502"):
-        yield "http://127.0.0.1:8502"; return
+        yield "http://127.0.0.1:8502"
+        return
 
     if not PLAYWRIGHT_AVAILABLE:
         pytest.skip("playwright not installed and no webui server reachable")
@@ -85,21 +96,27 @@ def webui_server():
         url = f"http://127.0.0.1:{port}"
         deadline = time.time() + 35
         while time.time() < deadline:
-            if _server_reachable(url): break
+            if _server_reachable(url):
+                break
             time.sleep(1)
         else:
             pytest.skip("could not start webui server")
         yield url
     finally:
         try:
-            if os.name != "nt": os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            else: proc.terminate()
+            if os.name != "nt":
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            else:
+                proc.terminate()
         except Exception:
             pass
-        try: proc.wait(timeout=8)
+        try:
+            proc.wait(timeout=8)
         except Exception:
-            try: proc.kill()
-            except Exception: pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
 
 def _open_llm_settings(page, base_url):
@@ -221,4 +238,5 @@ class TestResponsiveGeometry:
             assert info["overflow"], "tab strip should overflow on mobile"
             assert info["hasFade"], "tab strip must render a right-edge fade affordance"
             assert info["systemFullyVisible"], f"System tab unreachable when scrolled: right={info['systemRight']} win={info['winW']}"
-            ctx.close(); b.close()
+            ctx.close()
+            b.close()

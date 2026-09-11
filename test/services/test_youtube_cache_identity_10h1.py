@@ -73,7 +73,8 @@ def test_cache_unrelated_provider_unaffected():
 def test_cache_lookup_reuses_existing_file():
     """save_video_youtube returns the cached path without re-downloading when the
     file already exists (regression for the cache-lookup path)."""
-    import os, tempfile
+    import os
+    import tempfile
     tmp = tempfile.mkdtemp()
     url = "https://www.youtube.com/watch?v=LOOKUP1111a"
     ident = material._youtube_video_identity(url)
@@ -104,7 +105,8 @@ def test_cache_lookup_reuses_existing_file():
 def test_cache_equivalent_url_variation_no_double_download():
     """Two equivalent but textually different URLs for the SAME video must resolve
     to the same cache file, so the video is not downloaded twice."""
-    import os, tempfile
+    import os
+    import tempfile
     tmp = tempfile.mkdtemp()
     watch = "https://www.youtube.com/watch?v=SAMEVID0001"
     youtu = "https://youtu.be/SAMEVID0001"

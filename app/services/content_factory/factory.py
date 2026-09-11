@@ -291,7 +291,6 @@ class ContentFactory:
         Uses the existing MPT task creation infrastructure.
         """
         from app import models
-        from app.config import config
         from app.services import state as sm
         from app.services.task import start
 

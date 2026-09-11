@@ -192,7 +192,8 @@ def test_15_youtube_download_failure_fail_clean():
 
 def test_15_b_youtube_download_success():
     """Happy path: yt_dlp download writes file, returns path."""
-    import os, tempfile
+    import os
+    import tempfile
     from app.services.material import save_video_youtube
 
     tmp = tempfile.mkdtemp()
@@ -257,8 +258,8 @@ def test_16_provider_fallback_pexels_then_youtube(tmp_path):
 
     def fake_save_video(video_url, save_dir):
         # Return a real file path (simulating a downloaded clip)
-        import os, subprocess, tempfile
-        from app.services.reframe import reframe_to_portrait
+        import os
+        import subprocess
         path = os.path.join(save_dir, f"vid-{hash(video_url) % 100000}.mp4")
         subprocess.run(
             ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x108010:s=1920x1080:d=5:r=24",
@@ -396,7 +397,8 @@ def test_18_provenance_stored_with_youtube_fields(tmp_path):
         return list(youtube_results)
 
     def fake_save_video(video_url, save_dir):
-        import os, subprocess
+        import os
+        import subprocess
         path = os.path.join(save_dir, "vid-ABC123.mp4")
         subprocess.run(
             ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x108010:s=1280x720:d=5:r=24",
@@ -494,7 +496,8 @@ def test_18b_no_cross_scene_substitution(tmp_path):
         return list(search_call["results"][idx])
 
     def fake_save_video(video_url, save_dir):
-        import os, subprocess
+        import os
+        import subprocess
         path = os.path.join(save_dir, f"clip-{search_call['count']}.mp4")
         subprocess.run(
             ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x108010:s=1080x1920:d=5:r=24",

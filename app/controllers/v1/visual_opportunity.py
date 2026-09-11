@@ -18,7 +18,6 @@ from app.models.schema import (
 )
 from app.services.visual_opportunity import (
     VisualOpportunityAssessment,
-    VisualOpportunityEngine,
     create_visual_opportunity_engine,
 )
 

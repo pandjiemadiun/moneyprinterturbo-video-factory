@@ -9,7 +9,6 @@ Verifies:
 - Final video preview/download remains functional
 """
 
-import os
 import sys
 import unittest
 from pathlib import Path
